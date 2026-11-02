@@ -1,0 +1,29 @@
+{% load ui %}{% autoescape off %}{{ company.name }}
+{{ title }}
+
+Total sales:      {{ r.total_sales|fcfa }} FCFA ({{ r.sales_count }} sales, our own stock only)
+Money received:   {{ r.total_received|fcfa }} FCFA{% if r.neighbor_money %} (includes {{ r.neighbor_money|fcfa }} FCFA from neighbor items){% endif %}
+Sold on credit:   {{ r.credit_issued|fcfa }} FCFA
+Debts collected:  {{ r.debt_collected|fcfa }} FCFA
+Gross profit:     {{ r.profit|fcfa }} FCFA (our stock {{ r.own_profit|fcfa }}, neighbor items {{ r.neighbor.neighbor_profit|fcfa }})
+Discounts given:  {{ r.discount_given|fcfa }} FCFA
+
+By payment method:
+{% for m in r.by_method %}  {{ m.label }}: {{ m.total|fcfa }} FCFA ({{ m.count }})
+{% endfor %}
+Neighbor items: {{ r.neighbor.neighbor_qty }} sold for {{ r.neighbor.neighbor_revenue|fcfa }} FCFA (not in sales), profit {{ r.neighbor.neighbor_profit|fcfa }} FCFA{% if r.neighbor.neighbor_loss %}, lost {{ r.neighbor.neighbor_loss|fcfa }} FCFA on items sold below cost{% endif %}.
+{% for n in r.neighbor_breakdown %}  {{ n.name }}: x{{ n.items }}, profit {{ n.profit|fcfa }} FCFA
+{% endfor %}Still owed to neighbors: {{ r.neighbor_owed.total|fcfa }} FCFA.
+
+Credit sales:{% for c in r.credit_sales %}
+  {{ c.customer }} ({{ c.invoice }}): {{ c.amount|fcfa }} FCFA{% if c.due_date %}, due {{ c.due_date|date:"d M Y" }}{% endif %}{% empty %} none{% endfor %}
+{% if kind == 'eod' %}
+Items sold:
+{% for p in r.items_sold %}  {{ p.description }} x{{ p.qty }}: {{ p.amount|fcfa }} FCFA
+{% empty %}  none from our own stock
+{% endfor %}{% endif %}
+Debts: {{ r.debts.outstanding|fcfa }} FCFA owed, {{ r.debts.overdue_total|fcfa }} FCFA overdue.
+Price approvals: {{ r.discounts_approved }} approved, {{ r.discounts_declined }} declined/expired.
+
+The detailed sales lines are attached as CSV.
+{% endautoescape %}

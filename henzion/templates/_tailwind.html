@@ -1,0 +1,9 @@
+{% load static %}{% if tailwind_cdn %}
+  {# static/css/tailwind.css has not been built yet: fall back to the Tailwind CDN (development only, needs internet). Run "npm run build:css". #}
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { brand: { pink: '#f6097f', navy: '#1e293b', cyan: '#22d3ee' } } } } }
+  </script>
+{% else %}
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+{% endif %}

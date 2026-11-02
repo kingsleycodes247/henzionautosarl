@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto max-w-md rounded-xl bg-white p-6 shadow-sm">
+  <h1 class="text-xl font-bold text-red-700">Delete this record?</h1>
+  <p class="mt-2 text-sm"><strong>{{ object }}</strong></p>
+  {% if warning %}<p class="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">{{ warning }}</p>{% endif %}
+  <p class="mt-2 text-xs text-slate-500">This is recorded in the audit log and cannot be undone.</p>
+  <form method="post" class="mt-5 flex gap-3">{% csrf_token %}
+    <button class="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-700">Yes, delete</button>
+    <a href="{{ cancel_url }}" class="rounded-lg border border-slate-300 px-5 py-2 text-sm hover:bg-slate-50">Cancel</a>
+  </form>
+</div>
+{% endblock %}

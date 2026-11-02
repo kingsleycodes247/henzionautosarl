@@ -1,0 +1,9 @@
+{% load ui %}{% if is_paginated %}{% query_string as qs %}
+<div class="mt-4 flex items-center justify-between text-sm">
+  <span class="text-slate-500">Page {{ page_obj.number }} of {{ paginator.num_pages }}</span>
+  <div class="flex gap-2">
+    {% if page_obj.has_previous %}<a class="rounded border bg-white px-3 py-1 hover:bg-slate-50" href="?{{ qs }}page={{ page_obj.previous_page_number }}">← Previous</a>{% endif %}
+    {% if page_obj.has_next %}<a class="rounded border bg-white px-3 py-1 hover:bg-slate-50" href="?{{ qs }}page={{ page_obj.next_page_number }}">Next →</a>{% endif %}
+  </div>
+</div>
+{% endif %}

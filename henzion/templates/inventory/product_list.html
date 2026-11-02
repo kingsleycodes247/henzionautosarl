@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-2xl font-bold">Products &amp; stock</h1>
+  {% if user.is_owner %}
+  <div class="flex flex-wrap gap-2 text-sm">
+    <a href="{% url 'product_create' %}" class="rounded-lg bg-brand-pink px-4 py-2 font-semibold text-white">+ New product</a>
+    <a href="{% url 'receive_stock' %}" class="rounded-lg bg-brand-navy px-4 py-2 text-white">Receive stock</a>
+    <a href="{% url 'adjust_stock' %}" class="rounded-lg border bg-white px-4 py-2">Adjust stock</a>
+    <a href="{% url 'category_list' %}" class="rounded-lg border bg-white px-4 py-2">Categories</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if user.is_owner %}
+<a href="{% url 'stock_value' %}" class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200 hover:ring-brand-pink">
+  <div class="text-sm"><span class="text-slate-500">Goods in stock are worth</span>
+    <strong class="text-lg text-brand-pink">{{ valuation.retail|fcfa }} FCFA</strong> <span class="text-slate-500">at selling price</span></div>
+  <div class="text-sm text-slate-600">cost {{ valuation.cost|fcfa }} · potential profit <strong class="text-emerald-700">{{ valuation.profit|fcfa }}</strong> · see details →</div>
+</a>
+{% endif %}
+
+<form class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+  <input name="q" value="{{ q }}" placeholder="Search name or code…" class="w-64 rounded-lg border border-slate-300 px-3 py-2">
+  <label class="flex items-center gap-2"><input type="checkbox" name="low" value="1" {% if low %}checked{% endif %}> Low stock only</label>
+  <label class="flex items-center gap-2"><input type="checkbox" name="show" value="all" {% if show == 'all' %}checked{% endif %}> Show inactive</label>
+  <button class="rounded-lg bg-slate-800 px-4 py-2 text-white">Filter</button>
+</form>
+
+<div class="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
+<table class="w-full text-sm">
+  <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr>
+    <th class="px-4 py-3">Product</th><th class="px-4 py-3">Category</th>{% if user.is_owner %}<th class="px-4 py-3 text-right">Cost</th>{% endif %}
+    <th class="px-4 py-3 text-right">Price</th><th class="px-4 py-3 text-right">In stock</th>{% if user.is_owner %}<th class="px-4 py-3 text-right">Stock worth</th>{% endif %}<th></th></tr></thead>
+  {% for p in products %}
+  <tr class="border-t {% if not p.is_active %}opacity-50{% endif %}">
+    <td class="px-4 py-3"><div class="font-medium">{{ p.name }}</div><div class="text-xs text-slate-500">{{ p.sku }}</div></td>
+    <td class="px-4 py-3">{{ p.category|default:"-" }}</td>
+    {% if user.is_owner %}<td class="px-4 py-3 text-right text-slate-500">{{ p.cost_price|fcfa }}</td>{% endif %}
+    <td class="px-4 py-3 text-right">{{ p.selling_price|fcfa }}</td>
+    <td class="px-4 py-3 text-right font-semibold {% if p.stock_qty <= p.reorder_level %}text-amber-600{% endif %}">{{ p.stock_qty }} <span class="text-xs font-normal text-slate-500">{{ p.unit }}</span>
+      {% if p.stock_qty <= p.reorder_level %}<div class="text-xs font-normal text-amber-600">low</div>{% endif %}</td>
+    {% if user.is_owner %}<td class="px-4 py-3 text-right">{{ p.stock_qty|mul:p.selling_price|fcfa }}<div class="text-xs text-slate-500">cost {{ p.stock_qty|mul:p.cost_price|fcfa }}</div></td>{% endif %}
+    <td class="px-4 py-3 text-right whitespace-nowrap">
+      <a class="text-xs text-slate-600 hover:underline" href="{% url 'movement_list' %}?product={{ p.pk }}">History</a>
+      {% if user.is_owner %} ·
+      <a class="text-xs text-brand-pink hover:underline" href="{% url 'product_update' p.pk %}">Edit</a> ·
+      <a class="text-xs text-red-600 hover:underline" href="{% url 'product_delete' p.pk %}">Delete</a>{% endif %}
+    </td>
+  </tr>
+  {% empty %}<tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">No products found.</td></tr>{% endfor %}
+</table></div>
+{% include "_pagination.html" %}
+{% endblock %}

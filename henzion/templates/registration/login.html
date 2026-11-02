@@ -1,0 +1,26 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · {{ company.name }}</title>
+  <link rel="icon" href="{% static 'img/logo.jpeg' %}">
+  {% include "_tailwind.html" %}
+</head>
+<body class="min-h-screen bg-[#1e293b] flex items-center justify-center p-4">
+  <div class="w-full max-w-sm rounded-2xl bg-white p-8 shadow-xl">
+    <img src="{% static 'img/logo.jpeg' %}" alt="HenZion Auto SARL" class="mx-auto h-28 w-28 rounded-xl object-cover">
+    <h1 class="mt-4 text-center text-xl font-bold text-slate-800">{{ company.name }}</h1>
+    <p class="text-center text-sm text-slate-500 mb-6">Sign in to continue</p>
+    {% if form.errors %}<div class="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">Wrong username or password.</div>{% endif %}
+    <form method="post" class="space-y-4">{% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <div><label class="block text-sm font-medium mb-1">Username</label>
+        <input name="username" autofocus required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-pink-500 focus:ring-1 focus:ring-pink-500 outline-none"></div>
+      <div><label class="block text-sm font-medium mb-1">Password</label>
+        <input name="password" type="password" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-pink-500 focus:ring-1 focus:ring-pink-500 outline-none"></div>
+      <button class="w-full rounded-lg bg-[#f6097f] py-2.5 font-semibold text-white hover:opacity-90">Log in</button>
+    </form>
+  </div>
+</body>
+</html>

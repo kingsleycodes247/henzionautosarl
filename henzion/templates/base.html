@@ -1,0 +1,71 @@
+{% load static ui %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ company.name }}{% endblock %}</title>
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <link rel="icon" href="{% static 'img/logo.jpeg' %}">
+  {% include "_tailwind.html" %}
+  <style>[x-cloak]{display:none!important}</style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased">
+<div class="min-h-screen lg:flex">
+
+  <!-- Sidebar -->
+  <aside class="bg-brand-navy text-slate-300 lg:w-64 lg:min-h-screen lg:flex-shrink-0 print:hidden">
+    <div class="flex items-center gap-3 px-4 py-4 border-b border-slate-700">
+      <img src="{% static 'img/logo.jpeg' %}" alt="" class="h-11 w-11 rounded object-cover">
+      <div class="leading-tight">
+        <div class="font-bold text-white text-sm">{{ company.name }}</div>
+        <div class="text-xs text-brand-cyan">Inventory &amp; Sales</div>
+      </div>
+    </div>
+    <nav class="p-3 flex lg:block gap-1 overflow-x-auto text-sm">
+      <a href="{% url 'dashboard' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/' %}">Dashboard</a>
+      <a href="{% url 'pos' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 font-semibold {% nav_active '/sales/new' %}"><span class="text-brand-pink">●</span> New sale</a>
+      <a href="{% url 'sale_list' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/sales/' %}">Sales &amp; invoices</a>
+      <a href="{% url 'debt_list' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/debts/' %}">Debts register</a>
+      <a href="{% url 'customer_list' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/debts/customers' %}">Customers</a>
+      <a href="{% url 'product_list' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/inventory/' %}">Products &amp; stock</a>
+      <a href="{% url 'movement_list' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/inventory/movements' %}">Stock history</a>
+      {% if user.is_owner %}
+        <a href="{% url 'discount_list' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/sales/discounts' %}">Price approvals
+          {% if pending_discounts %}<span class="ml-1 rounded-full bg-brand-pink px-2 py-0.5 text-xs text-white">{{ pending_discounts }}</span>{% endif %}</a>
+        <a href="{% url 'neighbor_items' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/sales/neighbors' %}">Neighbor items</a>
+        <a href="{% url 'reports' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/reports' %}">Reports</a>
+        <a href="{% url 'stock_value' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/inventory/valuation' %}">Stock worth</a>
+        <a href="{% url 'user_list' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/users' %}">Users</a>
+        <a href="{% url 'audit_log' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/audit' %}">Audit log</a>
+        <a href="{% url 'company_settings' %}" class="block whitespace-nowrap rounded-lg px-3 py-2 {% nav_active '/settings' %}">Settings</a>
+      {% endif %}
+    </nav>
+    <div class="hidden lg:block mt-4 px-4 py-3 border-t border-slate-700 text-xs">
+      <div class="text-white font-medium">{{ user.display_name }}</div>
+      <div class="mb-2">{{ user.get_role_display }}</div>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}
+        <button class="rounded bg-slate-700 px-3 py-1.5 text-white hover:bg-slate-600">Log out</button>
+      </form>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 min-w-0">
+    <div class="lg:hidden flex items-center justify-between bg-white px-4 py-2 text-xs border-b print:hidden">
+      <span>{{ user.display_name }} · {{ user.get_role_display }}</span>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="text-brand-pink font-medium">Log out</button></form>
+    </div>
+    <div class="p-4 lg:p-8 max-w-7xl mx-auto">
+      {% for message in messages %}
+        <div class="mb-4 rounded-lg px-4 py-3 text-sm border
+          {% if message.tags == 'error' %}bg-red-50 border-red-200 text-red-800
+          {% elif message.tags == 'warning' %}bg-amber-50 border-amber-200 text-amber-800
+          {% else %}bg-emerald-50 border-emerald-200 text-emerald-800{% endif %}">{{ message }}</div>
+      {% endfor %}
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

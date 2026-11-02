@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center justify-between"><h1 class="text-2xl font-bold">Users</h1>
+  <a href="{% url 'user_create' %}" class="rounded-lg bg-brand-pink px-4 py-2 text-sm font-semibold text-white">+ New user</a></div>
+<p class="mt-2 text-sm text-slate-500">Disabling a user blocks their login and changes nothing else. Deleting removes the account; their sales and invoices stay, with their name kept on them.</p>
+<div class="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
+<table class="w-full text-sm">
+  <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Username</th><th class="px-4 py-3">Name</th><th class="px-4 py-3">Role</th><th class="px-4 py-3">Status</th><th></th></tr></thead>
+  {% for u in users %}
+  <tr class="border-t {% if not u.is_active %}bg-slate-50 text-slate-500{% endif %}"><td class="px-4 py-3 font-medium">{{ u.username }}{% if u == user %} <span class="text-xs text-slate-400">(you)</span>{% endif %}</td><td class="px-4 py-3">{{ u.get_full_name }}</td>
+    <td class="px-4 py-3">{{ u.get_role_display }}</td><td class="px-4 py-3">{% if u.is_active %}Active{% else %}<span class="text-red-600">Disabled</span>{% endif %}</td>
+    <td class="px-4 py-3 text-right whitespace-nowrap">
+      <a class="text-brand-pink hover:underline" href="{% url 'user_update' u.pk %}">Edit</a>
+      {% if u != user %}
+      <form method="post" action="{% url 'user_toggle_active' u.pk %}" class="ml-3 inline">{% csrf_token %}
+        <button class="text-slate-600 hover:underline">{% if u.is_active %}Disable{% else %}Enable{% endif %}</button></form>
+      <a class="ml-3 text-red-600 hover:underline" href="{% url 'user_delete' u.pk %}">Delete</a>
+      {% endif %}
+    </td></tr>
+  {% endfor %}
+</table></div>
+{% endblock %}

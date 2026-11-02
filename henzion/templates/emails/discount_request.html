@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{{ who }} asks to sell {{ product }} at {{ requested }} FCFA instead of {{ original }} FCFA. Tap to approve or decline.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:20px 0;">
+<tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:10px;overflow:hidden;">
+
+  <tr><td style="background:#1e293b;padding:18px 24px;">
+    <div style="color:#f6097f;font-size:20px;font-weight:bold;font-family:Georgia,serif;letter-spacing:1px;">{{ company|upper }}</div>
+    <div style="color:#22d3ee;font-size:12px;margin-top:2px;">Price reduction request</div>
+  </td></tr>
+
+  <tr><td style="padding:24px 24px 8px;">
+    <div style="font-size:18px;font-weight:bold;">Your approval is needed</div>
+    <div style="font-size:14px;color:#475569;margin-top:6px;line-height:1.5;"><strong>{{ who }}</strong> would like to sell the item below at a lower price. The sale will only go ahead if you approve.</div>
+  </td></tr>
+
+  <tr><td style="padding:12px 24px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;">
+      <tr><td style="padding:16px;">
+        <div style="font-size:16px;font-weight:bold;">{{ product }}{% if quantity > 1 %} <span style="color:#64748b;font-weight:normal;">× {{ quantity }}</span>{% endif %}</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;font-size:14px;">
+          <tr><td style="padding:4px 0;color:#64748b;">Normal price</td><td align="right" style="text-decoration:line-through;color:#64748b;">{{ original }} FCFA</td></tr>
+          <tr><td style="padding:4px 0;color:#64748b;">Requested price</td><td align="right" style="font-size:18px;font-weight:bold;color:#f6097f;">{{ requested }} FCFA</td></tr>
+          <tr><td style="padding:4px 0;color:#64748b;">Reduction</td><td align="right" style="font-weight:bold;">{{ percent }}% off{% if quantity > 1 %} (−{{ saving }} FCFA in total){% endif %}</td></tr>
+          <tr><td style="padding:4px 0;color:#64748b;">Asked by</td><td align="right">{{ who }}</td></tr>
+          {% if reason %}<tr><td style="padding:4px 0;color:#64748b;vertical-align:top;">Note</td><td align="right">{{ reason }}</td></tr>{% endif %}
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>
+
+  <tr><td align="center" style="padding:12px 24px 4px;">
+    <a href="{{ link }}" style="display:inline-block;background:#f6097f;color:#ffffff;text-decoration:none;font-weight:bold;font-size:16px;padding:14px 36px;border-radius:8px;">Review and decide</a>
+  </td></tr>
+  <tr><td align="center" style="padding:8px 24px 20px;font-size:12px;color:#64748b;line-height:1.5;">
+    You choose Approve or Decline on the next page.<br>
+    This request expires in {{ minutes }} minutes. No answer means the price stays the same.
+  </td></tr>
+
+  <tr><td style="background:#f8fafc;padding:14px 24px;font-size:11px;color:#94a3b8;line-height:1.5;">
+    Button not working? Copy this link into your browser:<br>
+    <span style="word-break:break-all;color:#64748b;">{{ link }}</span>
+  </td></tr>
+</table>
+</td></tr></table>
+</body>
+</html>

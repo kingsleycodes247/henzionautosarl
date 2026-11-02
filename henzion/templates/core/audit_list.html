@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold">Audit log</h1>
+<p class="text-sm text-slate-500">Who changed what, and when. Useful for debts, payments, prices and stock.</p>
+<div class="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
+<table class="w-full text-sm">
+  <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">When</th><th class="px-4 py-3">Who</th><th class="px-4 py-3">Action</th><th class="px-4 py-3">Target</th><th class="px-4 py-3">Details</th></tr></thead>
+  {% for e in entries %}
+  <tr class="border-t"><td class="px-4 py-2 whitespace-nowrap">{{ e.created_at|date:"d M Y H:i" }}</td><td class="px-4 py-2">{{ e.user.username|default:"system / link" }}</td>
+    <td class="px-4 py-2 font-medium">{{ e.action }}</td><td class="px-4 py-2">{{ e.target }}</td><td class="px-4 py-2 text-slate-500">{{ e.details }}</td></tr>
+  {% empty %}<tr><td colspan="5" class="px-4 py-6 text-center text-slate-500">Nothing recorded yet.</td></tr>{% endfor %}
+</table></div>
+{% include "_pagination.html" %}
+{% endblock %}

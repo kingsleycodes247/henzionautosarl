@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}New sale · {{ company.name }}{% endblock %}
+{% block content %}
+{{ products|json_script:"products-data" }}
+<div id="pos"
+     data-owner="{{ is_owner|yesno:'1,0' }}"
+     data-vat="{{ vat_rate }}"
+     data-sell-url="{% url 'pos' %}"
+     data-request-url="{% url 'discount_request' %}"
+     data-status-url="/sales/discount/__ID__/status/">
+
+<div class="flex items-center justify-between">
+  <h1 class="text-2xl font-bold">New sale</h1>
+  <span class="text-sm text-slate-500">{{ today }}</span>
+</div>
+
+<div class="mt-4 grid gap-5 xl:grid-cols-5">
+
+  <!-- Products -->
+  <section class="xl:col-span-2 rounded-xl bg-white p-4 shadow-sm">
+    <input id="search" autofocus autocomplete="off" placeholder="Search a product or scan its code…"
+           class="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm focus:border-pink-500 focus:ring-1 focus:ring-pink-500 outline-none">
+    <div id="product-list" class="mt-3 grid max-h-[28rem] gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2"></div>
+
+    <!-- Something the customer wants that we don't stock: fetched from a neighbor -->
+    <div class="mt-4 border-t pt-3">
+      <button type="button" id="n-toggle" class="w-full rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100">+ Item from a neighbor (not in our stock)</button>
+      <div id="n-box" class="mt-3 hidden space-y-2 rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+        <p class="text-xs text-slate-600">For something we don't stock. It is sold on the invoice like any item, but it is not added to our products or stock, and it does not count in our sales total. Only the profit is counted.</p>
+        <div><label class="block text-xs font-medium mb-1">Item name</label>
+          <input id="n-name" autocomplete="off" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+        <div><label class="block text-xs font-medium mb-1">Which neighbor</label>
+          <input id="n-neighbor" list="neighbor-names" autocomplete="off" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+          <datalist id="neighbor-names">{% for n in neighbors %}<option value="{{ n }}">{% endfor %}</datalist></div>
+        <div class="grid grid-cols-3 gap-2">
+          <div><label class="block text-xs font-medium mb-1">Qty</label>
+            <input id="n-qty" type="number" min="1" value="1" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+          <div><label class="block text-xs font-medium mb-1">Neighbor's price each</label>
+            <input id="n-cost" type="number" min="0" inputmode="numeric" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+          <div><label class="block text-xs font-medium mb-1">We sell at, each</label>
+            <input id="n-price" type="number" min="1" inputmode="numeric" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+        </div>
+        <button type="button" id="n-add" class="w-full rounded-lg bg-violet-600 py-2 text-sm font-semibold text-white hover:bg-violet-700">Add to this sale</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cart + payment -->
+  <section class="xl:col-span-3 space-y-4">
+    <div class="rounded-xl bg-white p-4 shadow-sm">
+      <h2 class="font-semibold">Items</h2>
+      <div class="mt-2 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-left text-xs uppercase text-slate-500"><tr>
+            <th class="py-2">Product</th><th class="py-2 w-20">Qty</th><th class="py-2 w-32">Unit price</th><th class="py-2 w-28 text-right">Amount</th><th class="w-8"></th></tr></thead>
+          <tbody id="cart-body"></tbody>
+        </table>
+      </div>
+      <p id="cart-empty" class="py-6 text-center text-sm text-slate-500">Tap a product to add it.</p>
+      <p class="mt-2 text-xs text-slate-500">To give a discount, lower the unit price. The boss is asked to confirm; the sale can only be completed after he approves.</p>
+      <div class="mt-3 space-y-1 border-t pt-3 text-sm text-right">
+        <div>Subtotal: <span id="subtotal" class="font-medium">0</span> FCFA</div>
+        <div id="vat-row" class="hidden">VAT: <span id="vat" class="font-medium">0</span> FCFA</div>
+        <div class="text-lg font-bold">Total: <span id="total" class="text-brand-pink">0</span> FCFA</div>
+      </div>
+    </div>
+
+    <div class="rounded-xl bg-white p-4 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="font-semibold">How is the customer paying?</h2>
+        <button type="button" id="pay-reset" class="text-xs text-brand-pink hover:underline">Reset: all cash</button>
+      </div>
+      <p class="mt-1 text-xs text-slate-500">Type the amount paid with each method. You can mix them, e.g. part cash, part Orange Money, and the rest on credit. The total must be fully covered.</p>
+
+      <div class="mt-3 space-y-2">
+        {% for key, label in methods %}
+        <div class="rounded-lg border border-slate-200 p-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="w-40 text-sm font-medium">{{ label }}</div>
+            <input type="number" min="0" step="1" value="0" inputmode="numeric" data-amount="{{ key }}"
+                   class="w-36 rounded-lg border border-slate-300 px-3 py-2 text-right text-sm focus:border-pink-500 focus:ring-1 focus:ring-pink-500 outline-none">
+            <span class="text-xs text-slate-500">FCFA</span>
+            <button type="button" data-fill="{{ key }}" class="text-xs text-brand-pink hover:underline">Put the rest here</button>
+          </div>
+          {% if key == 'mtn_momo' or key == 'orange_money' %}
+          <input data-ref="{{ key }}" placeholder="Transaction reference (from the confirmation SMS)"
+                 class="hidden mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+        <span>Entered: <strong id="paid-sum">0</strong> FCFA</span>
+        <span id="remaining-box" class="font-semibold"></span>
+      </div>
+    </div>
+
+    <div class="rounded-xl bg-white p-4 shadow-sm">
+      <h2 class="font-semibold">Customer <span id="cust-hint" class="text-sm font-normal text-slate-500">(optional, printed on the invoice)</span></h2>
+      <div class="mt-3 grid gap-3 sm:grid-cols-2">
+        <div><label class="block text-xs font-medium mb-1">Name <span class="req text-brand-pink hidden">*</span></label><input id="c-name" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></div>
+        <div><label class="block text-xs font-medium mb-1">Phone <span class="req text-brand-pink hidden">*</span></label><input id="c-phone" inputmode="tel" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></div>
+        <div class="sm:col-span-2"><label class="block text-xs font-medium mb-1">Address <span class="req text-brand-pink hidden">*</span></label><input id="c-address" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></div>
+        <div class="sm:col-span-2"><label class="block text-xs font-medium mb-1">Customer NIU / Tax ID</label><input id="c-niu" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></div>
+      </div>
+
+      <div id="credit-box" class="mt-4 hidden rounded-lg border border-amber-200 bg-amber-50 p-3">
+        <h3 class="text-sm font-semibold text-amber-800">Credit details: <span id="credit-amount" class="font-bold">0</span> FCFA will be owed</h3>
+        <div class="mt-2 grid gap-3 sm:grid-cols-2">
+          <div><label class="block text-xs font-medium mb-1">WhatsApp number</label><input id="c-whatsapp" inputmode="tel" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+          <div><label class="block text-xs font-medium mb-1">ID card number</label><input id="c-id" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+          <div><label class="block text-xs font-medium mb-1">Guarantor name</label><input id="c-gname" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+          <div><label class="block text-xs font-medium mb-1">Guarantor phone</label><input id="c-gphone" inputmode="tel" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-2"><label class="block text-xs font-medium mb-1">Date the customer promises to pay the rest <span class="text-brand-pink">*</span></label><input id="due-date" type="date" min="{{ today }}" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"></div>
+        </div>
+        <p class="mt-2 text-xs text-amber-800">Only the credit amount goes into the Debts register. Record each later payment there until it is settled.</p>
+      </div>
+
+      <div class="mt-3"><label class="block text-xs font-medium mb-1">Note on invoice</label><input id="notes" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></div>
+    </div>
+
+    <div id="error-box" class="hidden rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"></div>
+    <div id="pending-box" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      ⏳ Waiting for the boss to approve a reduced price… the sale can be completed once he answers.</div>
+
+    <button id="sell-btn" disabled class="w-full rounded-xl bg-brand-pink py-4 text-lg font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">Complete sale</button>
+  </section>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'js/pos.js' %}?v={{ pos_js_version }}"></script>
+{% endblock %}

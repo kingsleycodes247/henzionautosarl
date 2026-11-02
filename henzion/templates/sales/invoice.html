@@ -1,0 +1,150 @@
+{% load static ui %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice {{ sale.number }} · {{ company.name }}</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #e5e7eb; font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #1f2937; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .toolbar { max-width: 210mm; margin: 12px auto; display: flex; gap: 8px; justify-content: flex-end; }
+  .toolbar button, .toolbar a { background: #1e293b; color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; font-size: 14px; text-decoration: none; cursor: pointer; }
+  .toolbar a.ghost { background: #fff; color: #1e293b; }
+  .sheet { position: relative; width: 210mm; min-height: 297mm; margin: 0 auto 24px; background: #fff; padding: 11mm 12mm 9mm; }
+  .header { display: flex; gap: 18px; align-items: flex-start; }
+  .logo { width: 92px; height: 92px; object-fit: cover; background: #1e293b; flex: none; margin-top: 4px; }
+  .hd { flex: 1; text-align: center; }
+  .hd .tiny { font-size: 8.5px; letter-spacing: .6px; color: #64748b; text-transform: uppercase; }
+  .hd h1 { margin: 3px 0 2px; font: 700 27px Georgia, "Times New Roman", serif; color: #f6097f; text-transform: uppercase; }
+  .hd .tag { color: #1cc8e8; font-weight: 700; font-size: 12px; letter-spacing: .4px; text-transform: uppercase; }
+  .hd .desc { font: 10.5px Georgia, serif; color: #64748b; margin-top: 3px; }
+  .hd .addr { font: 700 10.5px Georgia, serif; color: #334155; margin-top: 2px; }
+  .titlebar { display: flex; height: 31px; margin-top: 20px; }
+  .titlebar .l { flex: 0 0 46%; background: #1e293b; color: #fff; font: 700 15px Georgia, serif; display: flex; align-items: center; justify-content: center; letter-spacing: .5px; }
+  .titlebar .r { flex: 1; background: #f6097f; color: #fff; font: 700 13px Georgia, serif; display: flex; align-items: center; justify-content: center; }
+  .info { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 12px; padding: 0 1mm; }
+  .info .box { background: #f3f4f6; padding: 9px 14px; font-size: 10px; }
+  .info .row { display: flex; align-items: baseline; height: 30px; }
+  .info .row b { flex: 0 0 76px; font-size: 10px; }
+  .info .row span { flex: 1; border-bottom: 0; font-size: 11px; font-weight: 600; min-height: 14px; }
+  table.items { width: calc(100% + 18mm); margin: 22px -9mm 0; border-collapse: collapse; }
+  table.items th { background: #1e293b; color: #fff; font: 11px Georgia, serif; font-weight: 400; letter-spacing: .3px; text-transform: uppercase; height: 22px; border: 1px solid #1e293b; }
+  table.items td { border: 1px solid #111; height: 25px; padding: 0 7px; font-size: 11px; }
+  table.items td.n { text-align: center; font-size: 9px; }
+  table.items td.r { text-align: right; }
+  .bottom { background: #f3f4f6; margin: 14px 1mm 0; padding: 12px 14px 0; }
+  .bottom .cols { display: flex; justify-content: space-between; gap: 20px; }
+  .bottom h4 { margin: 0 0 6px; font: 700 10px Georgia, serif; text-transform: uppercase; letter-spacing: .3px; color: #111; }
+  .bottom p { margin: 5px 0; font: 10px Georgia, serif; color: #555; }
+  .bottom p strong { color: #111; font-family: "Segoe UI", Arial, sans-serif; }
+  .sig-line { margin-top: 24px; border-top: 1px solid #94a3b8; width: 150px; }
+  .totals { margin-top: 8px; }
+  .totals .t { display: flex; justify-content: flex-end; align-items: center; height: 34px; font: 700 10px Georgia, serif; }
+  .totals .t .lab { width: 190px; text-align: right; padding-right: 36px; text-transform: uppercase; }
+  .totals .t .val { width: 160px; font-family: "Segoe UI", Arial, sans-serif; font-size: 12px; }
+  .grand { display: flex; height: 36px; margin: 6px -14px 0; }
+  .grand .l { flex: 0 0 62%; background: #1e293b; color: #fff; font: 700 10px Georgia, serif; text-transform: uppercase; display: flex; align-items: center; justify-content: flex-end; padding-right: 16px; }
+  .grand .r { flex: 1; background: #f6097f; color: #fff; font-weight: 700; font-size: 14px; display: flex; align-items: center; padding-left: 18px; }
+  .sign { display: flex; gap: 40px; margin: 18px 4mm 0; font: 700 10px Georgia, serif; }
+  .sign span.line { display: inline-block; border-bottom: 1px solid #555; width: 150px; margin: 0 4px; }
+  .note { margin: 12px 0 0; text-align: center; font: italic 9px Georgia, serif; color: #64748b; }
+  .thanks { margin-top: 20px; text-align: center; font: 10px Georgia, serif; color: #64748b; }
+  .watermark { position: absolute; top: 45%; left: 0; right: 0; text-align: center; font: 700 110px Arial; color: rgba(220, 38, 38, .18); transform: rotate(-25deg); pointer-events: none; }
+  @media print { body { background: #fff; } .toolbar { display: none; } .sheet { margin: 0; } }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <a class="ghost" href="{% url 'sale_detail' sale.pk %}">← Back</a>
+  <button onclick="window.print()">Print / Save as PDF</button>
+</div>
+
+<div class="sheet">
+  {% if sale.status == 'cancelled' %}<div class="watermark">CANCELLED</div>{% endif %}
+
+  <div class="header">
+    <img class="logo" src="{% static 'img/logo.jpeg' %}" alt="Logo">
+    <div class="hd">
+      <div class="tiny">{{ company.name }} &bull; Invoice / Facture</div>
+      <h1>{{ company.name }}</h1>
+      <div class="tag">{{ company.tagline }}</div>
+      <div class="desc">{{ company.description }}</div>
+      <div class="addr">HEAD OFFICE: {{ company.address }} &nbsp;|&nbsp; TEL: {{ company.phones }}</div>
+      <div class="addr">NIU: {{ company.niu }}</div>
+    </div>
+  </div>
+
+  <div class="titlebar">
+    <div class="l">FACTURE / INVOICE</div>
+    <div class="r">N° {{ sale.number }}</div>
+  </div>
+
+  <div class="info">
+    <div class="box">
+      <div class="row"><b>Date</b><span>{{ sale.date|date:"d / m / Y" }}</span></div>
+      <div class="row"><b>Customer</b><span>{{ sale.customer_name }}</span></div>
+      <div class="row"><b>Address</b><span>{{ sale.customer_address }}</span></div>
+    </div>
+    <div class="box">
+      <div class="row"><b>Due Date</b><span>{% if sale.due_date %}{{ sale.due_date|date:"d / m / Y" }}{% endif %}</span></div>
+      <div class="row"><b>Phone</b><span>{{ sale.customer_phone }}</span></div>
+      <div class="row"><b>NIU / Tax ID</b><span>{{ sale.customer_niu }}</span></div>
+    </div>
+  </div>
+
+  <table class="items">
+    <thead><tr>
+      <th style="width:5%">#</th><th style="width:41%">Description / Designation</th><th style="width:11%">Qty</th>
+      <th style="width:15%">Unit Price</th><th style="width:13%">Discount</th><th style="width:15%">Amount</th></tr></thead>
+    <tbody>
+      {% for i in items %}
+      <tr><td class="n">{{ forloop.counter }}</td><td>{{ i.description }}</td><td class="r">{{ i.quantity }}</td>
+        <td class="r">{{ i.unit_price|fcfa }}</td><td class="r">{% if i.discount %}{{ i.discount|fcfa }}{% endif %}</td><td class="r"><strong>{{ i.amount|fcfa }}</strong></td></tr>
+      {% endfor %}
+      {% for n in blank_rows %}
+      <tr><td class="n">{{ n }}</td><td></td><td></td><td></td><td></td><td></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="bottom">
+    <div class="cols">
+      <div style="flex:1">
+        <h4>Payment / Conditions</h4>
+        {% if payments|length > 1 %}
+          <p>Payment:
+            {% for p in payments %}<strong>{{ p.get_method_display }} {{ p.amount|fcfa }}</strong>{% if p.reference %} (ref. {{ p.reference }}){% endif %}{% if not forloop.last %} &nbsp;+&nbsp; {% endif %}{% endfor %} FCFA</p>
+        {% else %}
+          <p>Payment method: <strong>{{ method_label }}{% if sale.payment_reference %} (ref. {{ sale.payment_reference }}){% endif %}</strong></p>
+        {% endif %}
+        {% if debt %}
+          <p>Credit balance due: <strong>{{ debt.balance_amount|fcfa }} FCFA</strong>{% if sale.due_date %} by <strong>{{ sale.due_date|date:"d/m/Y" }}</strong>{% endif %}</p>
+        {% endif %}
+        <p>Terms / Notes: {{ sale.notes|default:"" }}</p>
+      </div>
+      <div style="width:200px">
+        <h4>Customer Signature</h4>
+        <div class="sig-line"></div>
+      </div>
+    </div>
+
+    <div class="totals">
+      <div class="t"><span class="lab">Subtotal</span><span class="val">{{ sale.subtotal|fcfa }} FCFA</span></div>
+      <div class="t"><span class="lab">VAT / Tax</span><span class="val">{{ sale.vat_amount|fcfa }} FCFA</span></div>
+    </div>
+    <div class="grand">
+      <div class="l">Total Due / Net à payer</div>
+      <div class="r">{{ sale.total|fcfa }} FCFA</div>
+    </div>
+  </div>
+
+  <div class="sign">
+    <div>Seller / Authorized signature: <span class="line"></span></div>
+    <div>Stamp: <span class="line"></span></div>
+  </div>
+  <p class="note">This invoice is issued for goods supplied by {{ company.name|upper }}. Please retain this document for your records.</p>
+  <p class="thanks">Thank you for your patronage &bull; Merci pour votre confiance</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div><h1 class="text-2xl font-bold">Reports</h1><p class="text-sm text-slate-500">{{ title }}</p></div>
+  <form class="flex flex-wrap items-end gap-2 text-sm">
+    <select name="kind" class="rounded-lg border border-slate-300 px-3 py-2">
+      <option value="daily" {% if kind == 'daily' %}selected{% endif %}>Daily</option>
+      <option value="weekly" {% if kind == 'weekly' %}selected{% endif %}>Weekly</option>
+      <option value="monthly" {% if kind == 'monthly' %}selected{% endif %}>Monthly</option></select>
+    <input type="date" name="date" value="{{ picked|date:'Y-m-d' }}" class="rounded-lg border border-slate-300 px-3 py-2">
+    <button class="rounded-lg bg-slate-800 px-4 py-2 text-white">Show</button>
+  </form>
+</div>
+
+<div class="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-white p-4 text-sm shadow-sm">
+  <form method="post">{% csrf_token %}<button class="rounded-lg bg-brand-pink px-4 py-2 font-semibold text-white">Email this report now</button></form>
+  <span class="text-slate-500">{% if boss_email %}Goes to {{ boss_email }}.{% else %}Set the boss email in Settings first.{% endif %}
+    Scheduled reports are sent by the <code>send_reports</code> command (see README).</span>
+</div>
+
+<div class="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Total sales</div><div class="mt-1 text-xl font-bold">{{ r.total_sales|fcfa }}</div><div class="text-xs text-slate-500">{{ r.sales_count }} sale{{ r.sales_count|pluralize }} · our stock only</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Money received</div><div class="mt-1 text-xl font-bold text-emerald-700">{{ r.total_received|fcfa }}</div><div class="text-xs text-slate-500">sales paid + debts collected{% if r.neighbor_money %} · includes {{ r.neighbor_money|fcfa }} from neighbor items{% endif %}</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Sold on credit</div><div class="mt-1 text-xl font-bold text-brand-pink">{{ r.credit_issued|fcfa }}</div><div class="text-xs text-slate-500">{{ r.debt_collected|fcfa }} collected</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Gross profit</div><div class="mt-1 text-xl font-bold">{{ r.profit|fcfa }}</div><div class="text-xs text-slate-500">our stock {{ r.own_profit|fcfa }} · neighbors {{ r.neighbor.neighbor_profit|fcfa }}<br>discounts given: {{ r.discount_given|fcfa }}</div></div>
+</div>
+
+<div class="mt-5 grid gap-5 lg:grid-cols-2">
+  <section class="rounded-xl bg-white p-5 shadow-sm">
+    <h2 class="font-semibold">Sales by payment method</h2>
+    <table class="mt-2 w-full text-sm">
+      {% for m in r.by_method %}<tr class="border-t"><td class="py-2">{{ m.label }}</td><td class="py-2 text-right text-slate-500">{{ m.count }}</td><td class="py-2 text-right font-medium">{{ m.total|fcfa }}</td></tr>{% endfor %}
+    </table>
+    <h2 class="mt-5 font-semibold">Money received</h2>
+    <table class="mt-2 w-full text-sm">
+      <tr class="text-xs uppercase text-slate-500"><td></td><td class="text-right">Sales</td><td class="text-right">Debt payments</td><td class="text-right">Total</td></tr>
+      {% for x in r.received %}<tr class="border-t"><td class="py-2">{{ x.label }}</td><td class="py-2 text-right">{{ x.sales|fcfa }}</td><td class="py-2 text-right">{{ x.debt_payments|fcfa }}</td><td class="py-2 text-right font-medium">{{ x.total|fcfa }}</td></tr>{% endfor %}
+    </table>
+  </section>
+
+  <section class="rounded-xl bg-white p-5 shadow-sm">
+    <h2 class="font-semibold">Top products</h2>
+    <table class="mt-2 w-full text-sm">
+      {% for p in r.top_products %}<tr class="border-t"><td class="py-2">{{ p.description }}</td><td class="py-2 text-right text-slate-500">×{{ p.qty }}</td><td class="py-2 text-right font-medium">{{ p.amount|fcfa }}</td></tr>
+      {% empty %}<tr><td class="py-3 text-slate-500">No sales in this period.</td></tr>{% endfor %}
+    </table>
+    <h2 class="mt-5 font-semibold">Price approvals</h2>
+    <p class="mt-1 text-sm">{{ r.discounts_approved }} approved · {{ r.discounts_declined }} declined or expired</p>
+  </section>
+
+  <section class="rounded-xl border border-violet-200 bg-white p-5 shadow-sm lg:col-span-2">
+    <div class="flex items-center justify-between"><h2 class="font-semibold">Items from neighbors</h2><a class="text-xs text-brand-pink" href="{% url 'neighbor_items' %}">Open table</a></div>
+    {% if r.neighbor.neighbor_lines %}
+    <p class="mt-1 text-sm text-slate-600">{{ r.neighbor.neighbor_qty }} item{{ r.neighbor.neighbor_qty|pluralize }} sold for {{ r.neighbor.neighbor_revenue|fcfa }} FCFA (not counted in sales). Neighbors' price {{ r.neighbor.neighbor_cost|fcfa }}. Profit <strong class="{% if r.neighbor.neighbor_profit < 0 %}text-red-600{% endif %}">{{ r.neighbor.neighbor_profit|fcfa }}</strong> FCFA.
+      {% if r.neighbor.neighbor_loss %}<span class="text-red-600">{{ r.neighbor.neighbor_loss|fcfa }} FCFA lost on {{ r.neighbor.neighbor_loss_lines }} item line{{ r.neighbor.neighbor_loss_lines|pluralize }} sold below cost.</span>{% endif %}</p>
+    <table class="mt-2 w-full text-sm">
+      <tr class="text-xs uppercase text-slate-500"><td>Neighbor</td><td class="text-right">Items</td><td class="text-right">Sold for</td><td class="text-right">Their price</td><td class="text-right">Profit</td></tr>
+      {% for n in r.neighbor_breakdown %}<tr class="border-t"><td class="py-1.5">{{ n.name }}</td><td class="text-right">{{ n.items }}</td><td class="text-right">{{ n.revenue|fcfa }}</td><td class="text-right">{{ n.cost|fcfa }}</td><td class="text-right font-medium {% if n.profit < 0 %}text-red-600{% endif %}">{{ n.profit|fcfa }}</td></tr>{% endfor %}
+    </table>
+    {% else %}<p class="mt-1 text-sm text-slate-500">No neighbor items sold in this period.</p>{% endif %}
+    <p class="mt-2 text-sm">Still owed to neighbors (all dates): <strong>{{ r.neighbor_owed.total|fcfa }} FCFA</strong></p>
+  </section>
+
+  <section class="rounded-xl bg-white p-5 shadow-sm">
+    <h2 class="font-semibold">Credit sales</h2>
+    <table class="mt-2 w-full text-sm">
+      {% for c in r.credit_sales %}<tr class="border-t"><td class="py-2">{{ c.customer }}<div class="text-xs text-slate-500">{{ c.invoice }}{% if c.due_date %} · due {{ c.due_date|date:"d M Y" }}{% endif %}</div></td><td class="py-2 text-right font-medium text-brand-pink">{{ c.amount|fcfa }}</td></tr>
+      {% empty %}<tr><td class="py-3 text-slate-500">No credit sales in this period.</td></tr>{% endfor %}
+    </table>
+  </section>
+
+  {% if r.daily|length > 1 %}
+  <section class="rounded-xl bg-white p-5 shadow-sm">
+    <h2 class="font-semibold">Day by day</h2>
+    <table class="mt-2 w-full text-sm">
+      {% for d in r.daily %}<tr class="border-t"><td class="py-1.5">{{ d.date|date:"D d M" }}</td><td class="py-1.5 text-right text-slate-500">{{ d.count }}</td><td class="py-1.5 text-right font-medium">{{ d.total|fcfa }}</td></tr>{% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  <section class="rounded-xl bg-white p-5 shadow-sm">
+    <h2 class="font-semibold">Debts right now</h2>
+    <p class="mt-1 text-sm">Owed: <strong>{{ r.debts.outstanding|fcfa }}</strong> FCFA · Overdue: <strong class="text-red-700">{{ r.debts.overdue_total|fcfa }}</strong></p>
+    <table class="mt-2 w-full text-sm">
+      {% for d in r.debts.overdue|slice:":8" %}<tr class="border-t"><td class="py-2">{{ d.customer.name }}<div class="text-xs text-slate-500">due {{ d.due_date|date:"d M" }}</div></td><td class="py-2 text-right font-medium">{{ d.balance_amount|fcfa }}</td></tr>{% endfor %}
+    </table>
+    <h2 class="mt-5 font-semibold">Low stock</h2>
+    {% for p in r.low_stock %}<div class="flex justify-between border-t py-1.5 text-sm"><span>{{ p.name }}</span><span class="font-semibold text-amber-600">{{ p.stock_qty }}</span></div>
+    {% empty %}<p class="text-sm text-slate-500">Everything is well stocked.</p>{% endfor %}
+  </section>
+</div>
+
+{% if history %}
+<h2 class="mt-8 font-semibold">Recently emailed</h2>
+<div class="mt-2 rounded-xl bg-white p-4 text-sm shadow-sm">
+  {% for h in history %}<div class="flex justify-between border-t py-1.5 first:border-0"><span>{{ h.get_kind_display }} · {{ h.period_start|date:"d M Y" }}</span>
+    <span class="{% if h.ok %}text-emerald-700{% else %}text-red-600{% endif %}">{% if h.ok %}sent{% else %}failed{% endif %} {{ h.sent_at|date:"d M H:i" }}</span></div>{% endfor %}
+</div>{% endif %}
+{% endblock %}

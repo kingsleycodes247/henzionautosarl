@@ -1,0 +1,13 @@
+{
+  "name": "henzion-auto",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Builds the Tailwind stylesheet for the HenZion Auto Django project",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i assets/tailwind.input.css -o static/css/tailwind.css --minify",
+    "watch:css": "tailwindcss -c tailwind.config.js -i assets/tailwind.input.css -o static/css/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}

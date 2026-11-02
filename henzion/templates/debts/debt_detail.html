@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block content %}
+<div class="flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <a href="{% url 'debt_list' %}" class="text-xs text-slate-500 hover:underline">← Debts register</a>
+    <h1 class="text-2xl font-bold">{{ debt.customer.name }}</h1>
+    <p class="text-sm text-slate-600">{{ debt.description }} · issued {{ debt.issued_on|date:"d M Y" }}{% if debt.due_date %} · due {{ debt.due_date|date:"d M Y" }}{% endif %}</p>
+  </div>
+  <div class="flex flex-wrap gap-2 text-sm">
+    {% if debt.sale %}<a href="{% url 'invoice' debt.sale.pk %}" target="_blank" class="rounded-lg border bg-white px-4 py-2">Invoice {{ debt.sale.number }}</a>{% endif %}
+    {% if user.is_owner %}
+      <a href="{% url 'debt_update' debt.pk %}" class="rounded-lg border bg-white px-4 py-2">Edit debt</a>
+      <a href="{% url 'debt_delete' debt.pk %}" class="rounded-lg border border-red-300 bg-white px-4 py-2 text-red-700">Delete</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="mt-5 grid grid-cols-3 gap-3 text-center">
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Total</div><div class="mt-1 text-lg font-bold">{{ debt.total|fcfa }}</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-emerald-700">Paid</div><div class="mt-1 text-lg font-bold text-emerald-700">{{ debt.paid_amount|fcfa }}</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm ring-1 {% if debt.is_paid %}ring-emerald-300{% else %}ring-brand-pink/40{% endif %}">
+    <div class="text-xs uppercase {% if debt.is_paid %}text-emerald-700{% else %}text-brand-pink{% endif %}">{% if debt.is_paid %}Settled ✓{% else %}Balance{% endif %}</div>
+    <div class="mt-1 text-lg font-bold {% if not debt.is_paid %}text-brand-pink{% endif %}">{{ debt.balance_amount|fcfa }}</div></div>
+</div>
+{% if debt.is_overdue %}<p class="mt-3 rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-700">Overdue since {{ debt.due_date|date:"d M Y" }}.</p>{% endif %}
+
+<div class="mt-5 grid gap-5 lg:grid-cols-3">
+  <section class="lg:col-span-2 rounded-xl bg-white p-5 shadow-sm">
+    <h2 class="font-semibold">Payments</h2>
+    <table class="mt-2 w-full text-sm">
+      {% for p in payments %}
+      <tr class="border-t">
+        <td class="py-2">{{ p.paid_on|date:"d M Y" }}</td>
+        <td class="py-2">{{ p.get_method_display }}{% if p.reference %}<div class="text-xs text-slate-500">ref {{ p.reference }}</div>{% endif %}{% if p.note %}<div class="text-xs text-slate-500">{{ p.note }}</div>{% endif %}</td>
+        <td class="py-2 text-right font-semibold text-emerald-700">+{{ p.amount|fcfa }}</td>
+        <td class="py-2 text-right whitespace-nowrap text-xs">
+          <a class="text-slate-600 hover:underline" href="{% url 'payment_receipt' p.pk %}" target="_blank">Receipt</a>
+          {% if user.is_owner %} · <a class="text-brand-pink hover:underline" href="{% url 'payment_update' p.pk %}">Edit</a> · <a class="text-red-600 hover:underline" href="{% url 'payment_delete' p.pk %}">Delete</a>{% endif %}
+        </td>
+      </tr>
+      {% empty %}<tr><td class="py-4 text-slate-500">No payment received yet.</td></tr>{% endfor %}
+    </table>
+    {% if debt.notes %}<p class="mt-4 border-t pt-3 text-sm text-slate-600"><strong>Notes:</strong> {{ debt.notes }}</p>{% endif %}
+  </section>
+
+  <div class="space-y-5">
+    {% if payment_form %}
+    <section class="rounded-xl bg-white p-5 shadow-sm">
+      <h2 class="font-semibold">Record a payment</h2>
+      <form method="post" action="{% url 'payment_create' debt.pk %}" class="mt-3 space-y-3">{% csrf_token %}
+        {% for field in payment_form %}
+          <div><label class="block text-xs font-medium mb-1">{{ field.label }}</label>{{ field }}</div>
+        {% endfor %}
+        <button class="w-full rounded-lg bg-brand-pink py-2 text-sm font-semibold text-white">Save payment</button>
+      </form>
+    </section>
+    {% endif %}
+
+    <section class="rounded-xl bg-white p-5 shadow-sm text-sm">
+      <h2 class="font-semibold">Customer</h2>
+      <p class="mt-2"><a class="font-medium hover:text-brand-pink" href="{% url 'customer_detail' debt.customer.pk %}">{{ debt.customer.name }}</a><br>
+        <span class="text-slate-500">{{ debt.customer.phone }}{% if debt.customer.whatsapp %} · WhatsApp {{ debt.customer.whatsapp }}{% endif %}<br>{{ debt.customer.address }}</span></p>
+      {% if debt.customer.guarantor_name %}<p class="mt-2 text-slate-500">Guarantor: {{ debt.customer.guarantor_name }} {{ debt.customer.guarantor_phone }}</p>{% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

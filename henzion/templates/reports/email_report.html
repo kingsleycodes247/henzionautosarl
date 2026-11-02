@@ -1,0 +1,114 @@
+{% load ui %}<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:16px 0;">
+<tr><td align="center">
+<table role="presentation" width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;">
+  <tr><td style="background:#1e293b;padding:18px 24px;">
+    <div style="color:#f6097f;font-size:20px;font-weight:bold;font-family:Georgia,serif;">{{ company.name|upper }}</div>
+    <div style="color:#22d3ee;font-size:12px;margin-top:2px;">{{ title }}</div>
+  </td></tr>
+
+  <tr><td style="padding:20px 24px 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td width="50%" style="padding:0 6px 12px 0;"><div style="background:#f8fafc;border-radius:6px;padding:12px;">
+        <div style="font-size:11px;color:#64748b;text-transform:uppercase;">Total sales</div>
+        <div style="font-size:20px;font-weight:bold;">{{ r.total_sales|fcfa }} <span style="font-size:11px;color:#64748b;">FCFA</span></div>
+        <div style="font-size:11px;color:#64748b;">{{ r.sales_count }} sale{{ r.sales_count|pluralize }} · our stock only</div></div></td>
+      <td width="50%" style="padding:0 0 12px 6px;"><div style="background:#ecfdf5;border-radius:6px;padding:12px;">
+        <div style="font-size:11px;color:#047857;text-transform:uppercase;">Money received</div>
+        <div style="font-size:20px;font-weight:bold;color:#047857;">{{ r.total_received|fcfa }} <span style="font-size:11px;">FCFA</span></div>
+        <div style="font-size:11px;color:#64748b;">sales paid + debts collected{% if r.neighbor_money %} (includes {{ r.neighbor_money|fcfa }} from neighbor items){% endif %}</div></div></td>
+    </tr><tr>
+      <td width="50%" style="padding:0 6px 12px 0;"><div style="background:#fdf2f8;border-radius:6px;padding:12px;">
+        <div style="font-size:11px;color:#f6097f;text-transform:uppercase;">Sold on credit</div>
+        <div style="font-size:20px;font-weight:bold;color:#f6097f;">{{ r.credit_issued|fcfa }} <span style="font-size:11px;">FCFA</span></div>
+        <div style="font-size:11px;color:#64748b;">{{ r.debt_collected|fcfa }} FCFA collected on debts</div></div></td>
+      <td width="50%" style="padding:0 0 12px 6px;"><div style="background:#f8fafc;border-radius:6px;padding:12px;">
+        <div style="font-size:11px;color:#64748b;text-transform:uppercase;">Gross profit</div>
+        <div style="font-size:20px;font-weight:bold;">{{ r.profit|fcfa }} <span style="font-size:11px;color:#64748b;">FCFA</span></div>
+        <div style="font-size:11px;color:#64748b;">our stock {{ r.own_profit|fcfa }} · neighbors {{ r.neighbor.neighbor_profit|fcfa }}<br>discounts given: {{ r.discount_given|fcfa }}</div></div></td>
+    </tr></table>
+  </td></tr>
+
+  <tr><td style="padding:8px 24px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Sales by payment method</div>
+    <table role="presentation" width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+      {% for m in r.by_method %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ m.label }}</td><td align="right" style="color:#64748b;">{{ m.count }}</td><td align="right"><strong>{{ m.total|fcfa }}</strong></td></tr>{% endfor %}
+    </table>
+  </td></tr>
+
+  {% if kind == 'eod' %}
+  <tr><td style="padding:8px 24px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Items sold today</div>
+    <table role="presentation" width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+      {% for p in r.items_sold %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ p.description }}</td><td align="right" style="color:#64748b;">×{{ p.qty }}</td><td align="right"><strong>{{ p.amount|fcfa }}</strong></td></tr>
+      {% empty %}<tr><td style="color:#64748b;">No items sold from our own stock.</td></tr>{% endfor %}
+    </table>
+  </td></tr>
+  {% else %}
+  <tr><td style="padding:8px 24px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Top products</div>
+    <table role="presentation" width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+      {% for p in r.top_products %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ p.description }}</td><td align="right" style="color:#64748b;">×{{ p.qty }}</td><td align="right"><strong>{{ p.amount|fcfa }}</strong></td></tr>
+      {% empty %}<tr><td style="color:#64748b;">No sales in this period.</td></tr>{% endfor %}
+    </table>
+  </td></tr>
+
+  <tr><td style="padding:8px 24px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Items from neighbors</div>
+    {% if r.neighbor.neighbor_lines %}
+    <div style="font-size:13px;">{{ r.neighbor.neighbor_qty }} item{{ r.neighbor.neighbor_qty|pluralize }} sold for {{ r.neighbor.neighbor_revenue|fcfa }} FCFA (not counted in sales). Neighbors' price {{ r.neighbor.neighbor_cost|fcfa }}. Profit: <strong>{{ r.neighbor.neighbor_profit|fcfa }} FCFA</strong>.{% if r.neighbor.neighbor_loss %} <span style="color:#b91c1c;">Lost {{ r.neighbor.neighbor_loss|fcfa }} FCFA on items sold below cost.</span>{% endif %}</div>
+    <table role="presentation" width="100%" cellpadding="5" cellspacing="0" style="font-size:13px;border-collapse:collapse;margin-top:6px;">
+      {% for n in r.neighbor_breakdown %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ n.name }}</td><td align="right" style="color:#64748b;">×{{ n.items }}</td><td align="right"><strong>{{ n.profit|fcfa }}</strong></td></tr>{% endfor %}
+    </table>
+    {% else %}<div style="font-size:13px;color:#64748b;">None sold in this period.</div>{% endif %}
+    <div style="font-size:13px;margin-top:6px;">Still owed to neighbors: <strong>{{ r.neighbor_owed.total|fcfa }} FCFA</strong></div>
+  </td></tr>
+
+  {% endif %}
+
+  <tr><td style="padding:8px 24px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Credit sales</div>
+    {% if r.credit_sales %}
+    <table role="presentation" width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+      {% for c in r.credit_sales %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ c.customer }}{% if c.phone %} <span style="color:#64748b;font-size:11px;">{{ c.phone }}</span>{% endif %}<div style="color:#64748b;font-size:11px;">{{ c.invoice }}{% if c.due_date %} · due {{ c.due_date|date:"d M Y" }}{% endif %}</div></td><td align="right"><strong style="color:#f6097f;">{{ c.amount|fcfa }}</strong></td></tr>{% endfor %}
+    </table>
+    {% else %}<div style="font-size:13px;color:#64748b;">No credit sales in this period.</div>{% endif %}
+  </td></tr>
+
+  {% if r.daily|length > 1 %}
+  <tr><td style="padding:8px 24px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Day by day</div>
+    <table role="presentation" width="100%" cellpadding="5" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+      {% for d in r.daily %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ d.date|date:"D d M" }}</td><td align="right" style="color:#64748b;">{{ d.count }}</td><td align="right"><strong>{{ d.total|fcfa }}</strong></td></tr>{% endfor %}
+    </table>
+  </td></tr>
+  {% endif %}
+
+  <tr><td style="padding:8px 24px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Debts right now</div>
+    <div style="font-size:13px;">Owed to you: <strong>{{ r.debts.outstanding|fcfa }} FCFA</strong> &nbsp;|&nbsp; Overdue: <strong style="color:#b91c1c;">{{ r.debts.overdue_total|fcfa }} FCFA</strong></div>
+    <table role="presentation" width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;margin-top:6px;">
+      {% for d in r.debts.overdue|slice:":10" %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ d.customer.name }} <span style="color:#64748b;font-size:11px;">due {{ d.due_date|date:"d M" }}</span></td><td align="right"><strong>{{ d.balance_amount|fcfa }}</strong></td></tr>{% endfor %}
+    </table>
+  </td></tr>
+
+  <tr><td style="padding:8px 24px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Price approvals</div>
+    <div style="font-size:13px;">{{ r.discounts_approved }} approved · {{ r.discounts_declined }} declined or expired</div>
+  </td></tr>
+
+  <tr><td style="padding:8px 24px 20px;">
+    <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Low stock</div>
+    {% for p in r.low_stock %}<div style="font-size:13px;border-top:1px solid #e2e8f0;padding:5px 0;">{{ p.name }} <strong style="float:right;color:#d97706;">{{ p.stock_qty }}</strong></div>
+    {% empty %}<div style="font-size:13px;color:#64748b;">Everything is well stocked.</div>{% endfor %}
+  </td></tr>
+
+  <tr><td style="background:#f8fafc;padding:12px 24px;font-size:11px;color:#64748b;">
+    Detailed sales lines are attached as a CSV file. {{ company.name }} · {{ company.phones }}
+  </td></tr>
+</table>
+</td></tr></table>
+</body>
+</html>

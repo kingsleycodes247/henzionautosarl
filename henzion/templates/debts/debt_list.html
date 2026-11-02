@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  <div><h1 class="text-2xl font-bold">Debts register</h1>
+    <p class="text-sm text-slate-500">Goods sold on credit. Each payment reduces the balance until the customer has paid in full.</p></div>
+  {% if user.is_owner %}<a href="{% url 'debt_create' %}" class="rounded-lg bg-brand-pink px-4 py-2 text-sm font-semibold text-white">+ Record debt</a>{% endif %}
+</div>
+
+<div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 text-sm">
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Total owed</div><div class="mt-1 text-lg font-bold text-brand-pink">{{ summary.outstanding|fcfa }}</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-red-600">Overdue</div><div class="mt-1 text-lg font-bold text-red-700">{{ summary.overdue_total|fcfa }}</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Customers owing</div><div class="mt-1 text-lg font-bold">{{ summary.debtor_count }}</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Over 60 days late</div><div class="mt-1 text-lg font-bold">{{ summary.ageing.late_61_plus|fcfa }}</div></div>
+</div>
+
+<form class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+  <input name="q" value="{{ q }}" placeholder="Customer, phone or item…" class="w-64 rounded-lg border border-slate-300 px-3 py-2">
+  <select name="status" class="rounded-lg border border-slate-300 px-3 py-2">
+    <option value="open" {% if status == 'open' %}selected{% endif %}>Still owing</option>
+    <option value="overdue" {% if status == 'overdue' %}selected{% endif %}>Overdue</option>
+    <option value="paid" {% if status == 'paid' %}selected{% endif %}>Fully paid</option>
+    <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
+  </select>
+  <button class="rounded-lg bg-slate-800 px-4 py-2 text-white">Filter</button>
+</form>
+
+<div class="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
+<table class="w-full text-sm">
+  <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr>
+    <th class="px-4 py-3">Customer</th><th class="px-4 py-3">Details</th><th class="px-4 py-3 text-right">Total</th><th class="px-4 py-3 text-right">Paid</th>
+    <th class="px-4 py-3 text-right">Balance</th><th class="px-4 py-3">Due</th><th class="px-4 py-3">Status</th><th></th></tr></thead>
+  {% for d in debts %}
+  <tr class="border-t">
+    <td class="px-4 py-3"><a class="font-medium hover:text-brand-pink" href="{% url 'customer_detail' d.customer.pk %}">{{ d.customer.name }}</a><div class="text-xs text-slate-500">{{ d.customer.phone }}</div></td>
+    <td class="px-4 py-3"><a class="hover:text-brand-pink" href="{% url 'debt_detail' d.pk %}">{{ d.description }}</a><div class="text-xs text-slate-500">{{ d.issued_on|date:"d M Y" }}</div></td>
+    <td class="px-4 py-3 text-right">{{ d.total|fcfa }}</td>
+    <td class="px-4 py-3 text-right text-emerald-700">{{ d.paid_amount|fcfa }}</td>
+    <td class="px-4 py-3 text-right font-bold">{{ d.balance_amount|fcfa }}</td>
+    <td class="px-4 py-3 whitespace-nowrap">{{ d.due_date|date:"d M Y"|default:"-" }}</td>
+    <td class="px-4 py-3"><span class="rounded px-2 py-0.5 text-xs font-medium
+      {% if d.status == 'paid' %}bg-emerald-100 text-emerald-700{% elif d.status == 'overdue' %}bg-red-100 text-red-700{% elif d.status == 'partial' %}bg-amber-100 text-amber-700{% else %}bg-slate-100 text-slate-700{% endif %}">{{ d.status_label }}</span></td>
+    <td class="px-4 py-3 text-right whitespace-nowrap">
+      {% if not d.is_paid %}<a class="text-xs font-semibold text-brand-pink hover:underline" href="{% url 'payment_create' d.pk %}">Record payment</a>{% endif %}
+      {% if user.is_owner %} · <a class="text-xs text-slate-600 hover:underline" href="{% url 'debt_update' d.pk %}">Edit</a> · <a class="text-xs text-red-600 hover:underline" href="{% url 'debt_delete' d.pk %}">Delete</a>{% endif %}
+    </td>
+  </tr>
+  {% empty %}<tr><td colspan="8" class="px-4 py-8 text-center text-slate-500">No debts match.</td></tr>{% endfor %}
+</table></div>
+{% include "_pagination.html" %}
+{% endblock %}
