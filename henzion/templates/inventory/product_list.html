@@ -22,10 +22,16 @@
 {% endif %}
 
 <form class="mt-4 flex flex-wrap items-center gap-3 text-sm">
-  <input name="q" value="{{ q }}" placeholder="Search name or code…" class="w-64 rounded-lg border border-slate-300 px-3 py-2">
+  <input name="q" value="{{ q }}" placeholder="Search name, code or category…" class="w-64 rounded-lg border border-slate-300 px-3 py-2">
+  <select name="category" class="rounded-lg border border-slate-300 px-3 py-2">
+    <option value="">All categories</option>
+    {% for c in categories %}<option value="{{ c.pk }}" {% if category == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+    <option value="none" {% if category == 'none' %}selected{% endif %}>No category</option>
+  </select>
   <label class="flex items-center gap-2"><input type="checkbox" name="low" value="1" {% if low %}checked{% endif %}> Low stock only</label>
   <label class="flex items-center gap-2"><input type="checkbox" name="show" value="all" {% if show == 'all' %}checked{% endif %}> Show inactive</label>
   <button class="rounded-lg bg-slate-800 px-4 py-2 text-white">Filter</button>
+  {% if q or category or low or show %}<a href="{% url 'product_list' %}" class="px-2 py-2 text-brand-pink">Clear</a>{% endif %}
 </form>
 
 <div class="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
@@ -36,13 +42,17 @@
   {% for p in products %}
   <tr class="border-t {% if not p.is_active %}opacity-50{% endif %}">
     <td class="px-4 py-3"><div class="font-medium">{{ p.name }}</div><div class="text-xs text-slate-500">{{ p.sku }}</div></td>
-    <td class="px-4 py-3">{{ p.category|default:"-" }}</td>
+    <td class="px-4 py-3">{% if p.category %}<a class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-pink-100" href="?category={{ p.category_id }}">{{ p.category }}</a>{% else %}-{% endif %}</td>
     {% if user.is_owner %}<td class="px-4 py-3 text-right text-slate-500">{{ p.cost_price|fcfa }}</td>{% endif %}
     <td class="px-4 py-3 text-right">{{ p.selling_price|fcfa }}</td>
-    <td class="px-4 py-3 text-right font-semibold {% if p.stock_qty <= p.reorder_level %}text-amber-600{% endif %}">{{ p.stock_qty }} <span class="text-xs font-normal text-slate-500">{{ p.unit }}</span>
+    <td class="px-4 py-3 text-right font-semibold {% if p.stock_qty <= p.reorder_level %}text-amber-600{% endif %}">{{ p.stock_qty|qty }} <span class="text-xs font-normal text-slate-500">{{ p.unit }}</span>
       {% if p.stock_qty <= p.reorder_level %}<div class="text-xs font-normal text-amber-600">low</div>{% endif %}</td>
     {% if user.is_owner %}<td class="px-4 py-3 text-right">{{ p.stock_qty|mul:p.selling_price|fcfa }}<div class="text-xs text-slate-500">cost {{ p.stock_qty|mul:p.cost_price|fcfa }}</div></td>{% endif %}
     <td class="px-4 py-3 text-right whitespace-nowrap">
+      {% if p.retail_version_id and p.pieces_per_carton and p.stock_qty >= 1 %}
+      <form method="post" action="{% url 'open_carton' %}" class="inline" onsubmit="return confirm('Open 1 carton and move {{ p.pieces_per_carton }} pieces to the shelf?')">{% csrf_token %}
+        <input type="hidden" name="product_id" value="{{ p.pk }}"><input type="hidden" name="count" value="1">
+        <button class="text-xs font-medium text-sky-700 hover:underline">Open carton</button></form> ·{% endif %}
       <a class="text-xs text-slate-600 hover:underline" href="{% url 'movement_list' %}?product={{ p.pk }}">History</a>
       {% if user.is_owner %} ·
       <a class="text-xs text-brand-pink hover:underline" href="{% url 'product_update' p.pk %}">Edit</a> ·

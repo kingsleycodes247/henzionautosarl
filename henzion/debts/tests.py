@@ -150,7 +150,7 @@ class DebtRegisterTests(TestCase):
             ("payment_receipt", [payment.pk]), ("customer_list", []), ("customer_detail", [self.customer.pk]),
             ("payment_update", [payment.pk]), ("debt_update", [debt.pk]), ("debt_delete", [debt.pk]),
             ("product_list", []), ("movement_list", []), ("sale_list", []), ("discount_list", []),
-            ("neighbor_items", []), ("reports", []), ("user_list", []), ("audit_log", []), ("company_settings", []),
+            ("neighbor_items", []), ("proforma_list", []), ("reports", []), ("user_list", []), ("audit_log", []), ("company_settings", []),
         ]:
             with self.subTest(page=name):
                 self.assertEqual(self.client.get(reverse(name, args=args)).status_code, 200)

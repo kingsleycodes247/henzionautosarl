@@ -2,7 +2,10 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.db.models import Q
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
 from django.urls import reverse, reverse_lazy
 from django.views.generic import CreateView, DeleteView, ListView, UpdateView
 
@@ -11,7 +14,7 @@ from core.permissions import FormPageMixin, OwnerRequiredMixin, owner_required
 
 from .forms import AdjustStockForm, CategoryForm, ProductForm, ReceiveStockForm
 from .models import Category, Product, StockMovement
-from .services import stock_valuation
+from .services import StockError, open_carton, stock_valuation
 
 
 class ProductListView(LoginRequiredMixin, ListView):
@@ -22,8 +25,13 @@ class ProductListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         qs = Product.objects.with_stock().select_related("category")
         q = self.request.GET.get("q", "").strip()
-        if q:
-            qs = qs.filter(Q(name__icontains=q) | Q(sku__icontains=q))
+        if q:  # typing a category name lists everything in that category
+            qs = qs.filter(Q(name__icontains=q) | Q(sku__icontains=q) | Q(category__name__icontains=q))
+        category = self.request.GET.get("category", "")
+        if category == "none":
+            qs = qs.filter(category__isnull=True)
+        elif category.isdigit():
+            qs = qs.filter(category_id=int(category))
         if self.request.GET.get("low"):
             from django.db.models import F
 
@@ -35,6 +43,8 @@ class ProductListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["q"] = self.request.GET.get("q", "")
+        ctx["categories"] = Category.objects.all()
+        ctx["category"] = self.request.GET.get("category", "")
         ctx["low"] = self.request.GET.get("low", "")
         ctx["show"] = self.request.GET.get("show", "")
         if self.request.user.is_owner:
@@ -114,10 +124,24 @@ def stock_value(request):
     data = stock_valuation()
     q = request.GET.get("q", "").strip().lower()
     rows = data["rows"]
-    if q:
-        rows = [r for r in rows if q in r["product"].name.lower() or q in r["product"].sku.lower()]
+    category = request.GET.get("category", "")
+    if q:  # a category name lists everything in that category
+        rows = [
+            r for r in rows
+            if q in r["product"].name.lower() or q in r["product"].sku.lower()
+            or (r["product"].category and q in r["product"].category.name.lower())
+        ]
+    if category == "none":
+        rows = [r for r in rows if r["product"].category_id is None]
+    elif category.isdigit():
+        rows = [r for r in rows if r["product"].category_id == int(category)]
+    selection = None
+    if q or category:
+        selection = {k: sum(r[k] for r in rows) for k in ("qty", "cost_value", "retail_value")}
+        selection["products"] = len(rows)
     return render(request, "inventory/stock_value.html", {
         "rows": rows, "totals": data["totals"], "categories": data["categories"], "q": request.GET.get("q", ""),
+        "category_list": Category.objects.all(), "category": category, "selection": selection,
     })
 
 
@@ -197,10 +221,35 @@ def adjust_stock(request):
             product=d["product"], kind=StockMovement.ADJUSTMENT, quantity=d["quantity"],
             note=d["note"], created_by=request.user,
         )
-        log(request.user, "stock adjusted", d["product"], f"{d['quantity']:+d}: {d['note']}")
+        log(request.user, "stock adjusted", d["product"], f"{d['quantity']:+}: {d['note']}")
         messages.success(request, "Stock adjusted.")
         return redirect("product_list")
     return render(request, "form.html", {
         "form": form, "page_title": "Adjust stock", "submit_label": "Save adjustment",
         "cancel_url": reverse("product_list"),
     })
+
+
+@login_required
+@require_POST
+def open_carton_view(request):
+    """Cashier or boss moves cartons onto the shelf. JSON from the till, or a plain form from the product list."""
+    import json
+
+    wants_json = request.content_type == "application/json"
+    try:
+        data = json.loads(request.body or b"{}") if wants_json else request.POST
+        result = open_carton(request.user, int(data.get("product_id")), int(data.get("count") or 1))
+    except StockError as exc:
+        if wants_json:
+            return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+        messages.error(request, str(exc))
+        return redirect("product_list")
+    except (ValueError, TypeError):
+        if wants_json:
+            return JsonResponse({"ok": False, "error": "Bad request."}, status=400)
+        return redirect("product_list")
+    if wants_json:
+        return JsonResponse({"ok": True, **result})
+    messages.success(request, f"Moved {result['pieces']} pieces to the shelf.")
+    return redirect("product_list")

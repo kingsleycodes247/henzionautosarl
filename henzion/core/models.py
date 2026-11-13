@@ -61,6 +61,18 @@ class CompanySettings(models.Model):
         "Email the report automatically when a cashier logs out in that window", default=True,
     )
 
+    notify_every_sale = models.BooleanField(
+        "Phone alert for each sale made by a cashier", default=False,
+        help_text="Sends a notification to the boss's phone when a cashier completes a sale.",
+    )
+    notify_sale_min = models.PositiveIntegerField(
+        "Only for sales of at least (FCFA)", default=0,
+        help_text="0 = every sale. For example 50000 = only sales of 50,000 FCFA or more (credit sales always count).",
+    )
+    notify_cancellations = models.BooleanField(
+        "Phone alert when a sale is cancelled", default=True,
+    )
+
     class Meta:
         verbose_name_plural = "Company settings"
 
@@ -94,3 +106,17 @@ def log(user, action, target, details=""):
         target=str(target)[:200],
         details=details,
     )
+
+
+class PushSubscription(models.Model):
+    """One browser/phone that agreed to receive notifications for a user."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="push_subscriptions")
+    endpoint = models.TextField(unique=True)
+    p256dh = models.CharField(max_length=200)
+    auth = models.CharField(max_length=100)
+    user_agent = models.CharField(max_length=250, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user} · {self.endpoint[:40]}…"

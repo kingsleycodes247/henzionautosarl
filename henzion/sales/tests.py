@@ -1,5 +1,6 @@
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -97,6 +98,15 @@ class DiscountApprovalTests(SalesTestBase):
     def test_cashier_cannot_sell_below_list_price_without_approval(self):
         with self.assertRaises(services.SaleError):
             services.create_sale(self.cashier, self.reduced())
+
+    def test_cashier_and_owner_can_sell_above_list_price(self):
+        for user in (self.cashier, self.owner):
+            sale = services.create_sale(user, self.payload(items=[{"product_id": self.product.pk, "quantity": 2, "price": 7000}]))
+            item = sale.items.get()
+            self.assertEqual(item.unit_price, 7000)
+            self.assertEqual(item.discount, 0)
+            self.assertEqual(item.amount, 14000)
+            self.assertEqual(sale.total, 14000)
 
     def test_pending_request_cannot_be_used(self):
         req = services.request_discount(self.cashier, self.product, 4000, 2, "regular customer")
@@ -572,3 +582,501 @@ class NeighborItemTests(SalesTestBase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.json()["ok"])
         self.assertContains(self.client.get(reverse("pos")), "Item from a neighbor")
+
+
+class UnpaidInvoiceTests(SalesTestBase):
+    """Unpaid (proforma) invoices: given out to be paid; no stock, no sale, until the money is received."""
+
+    def pf_payload(self, **overrides):
+        data = {
+            "customer": {"name": "ACME SARL", "phone": "677111222", "address": "Douala"},
+            "items": [{"product_id": self.product.pk, "quantity": 2, "price": 5000}],
+        }
+        data.update(overrides)
+        return data
+
+    def make_pf(self, user=None, **overrides):
+        return services.create_proforma(user or self.cashier, self.pf_payload(**overrides))
+
+    def pay(self, pf, **overrides):
+        item = pf.items.filter(is_sourced=False).first()
+        data = {"payment_method": "cash", "proforma_id": pf.pk, "items": [
+            {"product_id": item.product_id, "quantity": item.quantity, "price": item.net_price, "proforma_item_id": item.pk}]}
+        data.update(overrides)
+        return services.create_sale(self.cashier, data)
+
+    # --- creating ---------------------------------------------------------------------------
+    def test_creating_one_changes_no_stock_and_makes_no_sale_or_debt(self):
+        from sales.models import Proforma
+
+        pf = self.make_pf()
+        self.assertEqual(pf.number, f"PRO-{pf.pk:06d}")
+        self.assertEqual(pf.status, Proforma.OPEN)
+        self.assertEqual(pf.total, 10000)
+        self.assertEqual(self.stock(), 10)
+        self.assertEqual(StockMovement.objects.filter(product=self.product).count(), 1)
+        self.assertEqual(Sale.objects.count(), 0)
+        self.assertEqual(Debt.objects.count(), 0)
+        self.assertEqual(pf.valid_until, timezone.localdate() + timedelta(days=7))
+
+    def test_item_keeps_its_category_name_for_the_record(self):
+        from inventory.models import Category
+
+        self.product.category = Category.objects.create(name="Toyota")
+        self.product.save()
+        self.assertEqual(self.make_pf().items.get().category_name, "Toyota")
+
+    def test_customer_name_is_required_and_validity_is_limited(self):
+        with self.assertRaises(services.SaleError):
+            self.make_pf(customer={"name": " "})
+        for days in (0, 91, "x"):
+            with self.subTest(days=days), self.assertRaises(services.SaleError):
+                self.make_pf(valid_days=days)
+        self.assertEqual(self.make_pf(valid_days=30).valid_until, timezone.localdate() + timedelta(days=30))
+
+    def test_same_request_twice_makes_one_invoice(self):
+        from sales.models import Proforma
+
+        u = str(uuid.uuid4())
+        a, b = self.make_pf(client_uuid=u), self.make_pf(client_uuid=u)
+        self.assertEqual(a.pk, b.pk)
+        self.assertEqual(Proforma.objects.count(), 1)
+
+    def test_empty_invoice_is_rejected(self):
+        with self.assertRaises(services.SaleError):
+            self.make_pf(items=[])
+
+    def test_cashier_price_rules_apply_to_unpaid_invoices_too(self):
+        low = [{"product_id": self.product.pk, "quantity": 2, "price": 4000}]
+        with self.assertRaises(services.SaleError):
+            self.make_pf(items=low)  # needs the boss's approval
+        req = services.request_discount(self.cashier, self.product, 4000, 2)
+        services.decide_discount(req, True, "ok")
+        pf = self.make_pf(items=[dict(low[0], request_id=req.pk)])
+        self.assertEqual(pf.total, 8000)
+        self.assertEqual(pf.items.get().discount, 2000)
+        with self.assertRaises(services.SaleError):  # the approval is used up
+            self.make_pf(items=[dict(low[0], request_id=req.pk)])
+
+    def test_neighbor_items_can_be_quoted_and_do_not_show_the_neighbor(self):
+        pf = self.make_pf(sourced_items=[{"name": "Brake disc", "neighbor": "Mama Ngu", "quantity": 1, "cost": 1200, "price": 2000}])
+        self.assertEqual(pf.total, 12000)
+        self.client.force_login(self.cashier)
+        res = self.client.get(reverse("proforma_invoice", args=[pf.pk]))
+        self.assertContains(res, "Brake disc")
+        self.assertNotContains(res, "Mama Ngu")
+
+    # --- paying ----------------------------------------------------------------------------
+    def test_paying_it_makes_the_sale_takes_the_stock_and_marks_it_paid(self):
+        from sales.models import Proforma
+
+        pf = self.make_pf()
+        sale = self.pay(pf)
+        pf.refresh_from_db()
+        self.assertEqual(pf.status, Proforma.PAID)
+        self.assertEqual(pf.sale, sale)
+        self.assertEqual(sale.total, 10000)
+        self.assertEqual(self.stock(), 8)  # only now
+
+    def test_the_quoted_discount_is_honoured_after_the_approval_has_expired(self):
+        req = services.request_discount(self.cashier, self.product, 4000, 2)
+        services.decide_discount(req, True, "ok")
+        pf = self.make_pf(items=[{"product_id": self.product.pk, "quantity": 2, "price": 4000, "request_id": req.pk}])
+        DiscountRequest.objects.filter(pk=req.pk).update(decided_at=timezone.now() - timedelta(days=3))
+        sale = self.pay(pf)
+        self.assertEqual(sale.total, 8000)
+        self.assertEqual(sale.items.get().discount, 2000)
+
+    def test_a_different_price_or_more_quantity_than_quoted_is_not_honoured(self):
+        req = services.request_discount(self.cashier, self.product, 4000, 2)
+        services.decide_discount(req, True, "ok")
+        pf = self.make_pf(items=[{"product_id": self.product.pk, "quantity": 2, "price": 4000, "request_id": req.pk}])
+        item = pf.items.get()
+        base = {"payment_method": "cash", "proforma_id": pf.pk}
+        for qty, price in ((2, 3000), (3, 4000)):
+            with self.subTest(qty=qty, price=price), self.assertRaises(services.SaleError):
+                services.create_sale(self.cashier, dict(base, items=[
+                    {"product_id": self.product.pk, "quantity": qty, "price": price, "proforma_item_id": item.pk}]))
+        self.assertEqual(self.stock(), 10)
+
+    def test_a_cashier_cannot_use_someone_elses_quote_item_id_for_a_discount(self):
+        pf = self.make_pf()  # full price
+        item = pf.items.get()
+        with self.assertRaises(services.SaleError):
+            services.create_sale(self.cashier, {"payment_method": "cash", "proforma_id": pf.pk, "items": [
+                {"product_id": self.product.pk, "quantity": 2, "price": 1000, "proforma_item_id": item.pk}]})
+
+    def test_it_can_only_be_paid_once(self):
+        pf = self.make_pf()
+        self.pay(pf)
+        with self.assertRaises(services.SaleError):
+            self.pay(pf, client_uuid=str(uuid.uuid4()))
+        self.assertEqual(self.stock(), 8)
+
+    def test_cancelled_or_expired_ones_cannot_be_paid(self):
+        from sales.models import Proforma
+
+        gone = self.make_pf()
+        services.cancel_proforma(self.cashier, gone)
+        with self.assertRaises(services.SaleError):
+            self.pay(gone)
+        old = self.make_pf()
+        Proforma.objects.filter(pk=old.pk).update(valid_until=timezone.localdate() - timedelta(days=1))
+        old.refresh_from_db()
+        self.assertTrue(old.is_expired)
+        with self.assertRaises(services.SaleError):
+            self.pay(old)
+        self.assertEqual(self.stock(), 10)
+
+    def test_not_enough_stock_at_payment_time_blocks_it(self):
+        pf = self.make_pf(items=[{"product_id": self.product.pk, "quantity": 9, "price": 5000}])
+        StockMovement.objects.create(product=self.product, kind=StockMovement.ADJUSTMENT, quantity=-5)
+        with self.assertRaises(services.SaleError):
+            self.pay(pf)
+        pf.refresh_from_db()
+        self.assertTrue(pf.is_open)
+
+    def test_it_can_be_paid_in_split_or_credit_like_any_sale(self):
+        pf = self.make_pf()
+        sale = self.pay(
+            pf, payments=[{"method": "cash", "amount": 6000}, {"method": "credit", "amount": 4000}],
+            customer={"name": "ACME SARL", "phone": "677111222", "address": "Douala"},
+            due_date=(timezone.localdate() + timedelta(days=10)).isoformat(),
+        )
+        self.assertEqual(Debt.objects.with_balance().get(sale=sale).total, 4000)
+
+    def test_cancelling_leaves_stock_alone(self):
+        pf = self.make_pf()
+        services.cancel_proforma(self.cashier, pf)
+        pf.refresh_from_db()
+        self.assertEqual(pf.status, "cancelled")
+        self.assertEqual(self.stock(), 10)
+        with self.assertRaises(services.SaleError):
+            services.cancel_proforma(self.cashier, pf)
+
+    # --- not counted as sales -------------------------------------------------------------
+    def test_unpaid_invoices_are_not_in_sales_dashboard_or_reports_until_paid(self):
+        from reports.services import build_report
+
+        pf = self.make_pf()
+        today = timezone.localdate()
+        self.client.force_login(self.owner)
+        res = self.client.get(reverse("dashboard"))
+        self.assertEqual(res.context["today_total"], 0)
+        self.assertEqual(res.context["unpaid"]["count"], 1)
+        self.assertEqual(res.context["unpaid"]["total"], 10000)
+        r = build_report(today, today)
+        self.assertEqual(r["total_sales"], 0)
+        self.assertEqual(r["sales_count"], 0)
+        self.assertEqual(self.client.get(reverse("sale_list")).context["sales"].__len__(), 0)
+
+        self.pay(pf)
+        res = self.client.get(reverse("dashboard"))
+        self.assertEqual(res.context["today_total"], 10000)
+        self.assertEqual(res.context["unpaid"]["count"], 0)
+
+    # --- pages ---------------------------------------------------------------------------
+    def test_invoice_is_marked_unpaid_then_paid(self):
+        pf = self.make_pf()
+        self.client.force_login(self.cashier)
+        res = self.client.get(reverse("proforma_invoice", args=[pf.pk]))
+        self.assertContains(res, "UNPAID")
+        self.assertContains(res, "NOT YET PAID")
+        self.assertContains(res, pf.number)
+        self.assertContains(res, "ACME SARL")
+        self.assertContains(res, "Valid Until")
+        self.pay(pf)
+        self.assertContains(self.client.get(reverse("proforma_invoice", args=[pf.pk])), "PAID")
+
+    def test_pages_render_for_both_roles(self):
+        pf = self.make_pf()
+        for user in (self.cashier, self.owner):
+            self.client.force_login(user)
+            for name, args in (("proforma_list", []), ("proforma_detail", [pf.pk]), ("dashboard", []), ("pos", [])):
+                with self.subTest(user=user.username, page=name):
+                    self.assertEqual(self.client.get(reverse(name, args=args)).status_code, 200)
+        res = self.client.get(reverse("proforma_list") + "?status=all&q=ACME")
+        self.assertContains(res, pf.number)
+
+    def test_create_endpoint_returns_the_detail_page(self):
+        import json
+
+        self.client.force_login(self.cashier)
+        res = self.client.post(reverse("proforma_create"), data=json.dumps(self.pf_payload()), content_type="application/json")
+        self.assertTrue(res.json()["ok"])
+        bad = self.client.post(reverse("proforma_create"), data=json.dumps(self.pf_payload(customer={"name": ""})), content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        self.client.logout()
+        self.assertEqual(self.client.post(reverse("proforma_create"), data="{}", content_type="application/json").status_code, 302)
+
+    def test_till_loads_it_ready_to_pay_with_the_quoted_prices(self):
+        pf = self.make_pf()
+        self.client.force_login(self.cashier)
+        res = self.client.get(reverse("pos") + f"?proforma={pf.pk}")
+        self.assertEqual(res.context["prefill"]["mode"], "pay")
+        self.assertEqual(res.context["prefill"]["items"][0]["price"], 5000)
+        self.assertEqual(res.context["prefill"]["items"][0]["item_id"], pf.items.get().pk)
+        self.assertContains(res, "Payment received for unpaid invoice")
+        self.assertNotContains(res, 'id="pf-btn"')  # can't make another unpaid invoice while paying one
+
+    def test_a_paid_or_expired_one_does_not_load_for_payment_but_can_be_copied(self):
+        from sales.models import Proforma
+
+        pf = self.make_pf()
+        Proforma.objects.filter(pk=pf.pk).update(valid_until=timezone.localdate() - timedelta(days=1))
+        self.client.force_login(self.cashier)
+        self.assertIsNone(self.client.get(reverse("pos") + f"?proforma={pf.pk}").context["prefill"])
+        Product.objects.filter(pk=self.product.pk).update(selling_price=5500)
+        copy = self.client.get(reverse("pos") + f"?copy={pf.pk}").context["prefill"]
+        self.assertEqual(copy["mode"], "copy")
+        self.assertEqual(copy["items"][0]["price"], 5500)  # today's price
+        self.assertIsNone(copy["items"][0]["item_id"])
+
+    def test_cancel_permissions(self):
+        pf = self.make_pf(user=self.cashier)
+        other = User.objects.create_user("cash2", password="x", role=User.CASHIER)
+        self.client.force_login(other)
+        self.assertEqual(self.client.post(reverse("proforma_cancel", args=[pf.pk])).status_code, 403)
+        self.client.force_login(self.owner)
+        self.client.post(reverse("proforma_cancel", args=[pf.pk]))
+        pf.refresh_from_db()
+        self.assertEqual(pf.status, "cancelled")
+
+    def test_sale_page_links_back_to_the_unpaid_invoice(self):
+        pf = self.make_pf()
+        sale = self.pay(pf)
+        self.client.force_login(self.cashier)
+        self.assertContains(self.client.get(reverse("sale_detail", args=[sale.pk])), pf.number)
+
+
+class PushHookTests(SalesTestBase):
+    def test_boss_is_pushed_on_request_and_cashier_on_decision(self):
+        from unittest import mock
+
+        with mock.patch("sales.services.push.notify_users") as pushed:
+            req = services.request_discount(self.cashier, self.product, 4000, 2)
+            self.assertEqual(pushed.call_count, 1)
+            self.assertIn("/sales/discount/decide/", pushed.call_args.kwargs["url"])
+            services.decide_discount(req, True, "link")
+            self.assertEqual(pushed.call_count, 2)
+            self.assertEqual(pushed.call_args.args[0], [self.cashier])
+
+    def test_owner_own_discount_sends_no_push(self):
+        from unittest import mock
+
+        with mock.patch("sales.services.push.notify_users") as pushed:
+            services.request_discount(self.owner, self.product, 4000, 2)
+            pushed.assert_not_called()
+
+
+class HidePricesTests(UnpaidInvoiceTests):
+    """Inherits the helpers only; the parent's own tests are excluded below."""
+
+    def test_flag_is_saved_and_prices_are_left_out_of_the_page(self):
+        pf = self.make_pf(hide_prices=True)
+        self.assertTrue(pf.hide_prices)
+        self.client.force_login(self.cashier)
+        html = self.client.get(reverse("proforma_invoice", args=[pf.pk])).content.decode()
+        self.assertIn("Engine oil", html)
+        self.assertIn("Prices available on request", html)
+        for needle in ("5 000", "5,000", "5000", "10 000", "10,000", "10000", "Subtotal"):
+            self.assertNotIn(needle, html)
+
+    def test_default_shows_prices(self):
+        pf = self.make_pf()
+        self.assertFalse(pf.hide_prices)
+        self.client.force_login(self.cashier)
+        html = self.client.get(reverse("proforma_invoice", args=[pf.pk])).content.decode()
+        self.assertIn("Subtotal", html)
+
+    def test_toggle_and_final_receipt_always_shows_prices(self):
+        pf = self.make_pf(hide_prices=True)
+        self.client.force_login(self.cashier)
+        self.client.post(reverse("proforma_toggle_prices", args=[pf.pk]))
+        pf.refresh_from_db()
+        self.assertFalse(pf.hide_prices)
+        self.client.post(reverse("proforma_toggle_prices", args=[pf.pk]))
+        pf.refresh_from_db()
+        self.assertTrue(pf.hide_prices)
+        sale = self.pay(pf)
+        html = self.client.get(reverse("invoice", args=[sale.pk])).content.decode()
+        self.assertIn("Subtotal", html)
+        self.assertNotIn("Prices available on request", html)
+
+
+for _name in [n for n in dir(UnpaidInvoiceTests) if n.startswith("test_")]:
+    setattr(HidePricesTests, _name, None)  # don't re-run the parent's tests in this class
+
+
+class SaleAlertTests(SalesTestBase):
+    def setUp(self):
+        super().setUp()
+        self.cs = CompanySettings.get()
+
+    def sell(self, user=None, **kw):
+        from unittest import mock
+
+        with mock.patch("sales.services.push.notify_users") as pushed:
+            sale = services.create_sale(user or self.cashier, self.payload(**kw))
+        return sale, pushed
+
+    def test_off_by_default(self):
+        _, pushed = self.sell()
+        pushed.assert_not_called()
+
+    def test_on_sends_amount_and_cashier(self):
+        self.cs.notify_every_sale = True
+        self.cs.save()
+        sale, pushed = self.sell()
+        self.assertEqual(pushed.call_count, 1)
+        self.assertIn("10", pushed.call_args.args[1])  # title carries the amount
+        self.assertIn("cash", pushed.call_args.args[2])  # body names the cashier
+
+    def test_threshold_skips_small_cash_sales_but_not_credit(self):
+        self.cs.notify_every_sale = True
+        self.cs.notify_sale_min = 50000
+        self.cs.save()
+        _, pushed = self.sell()
+        pushed.assert_not_called()
+        credit = self.payload(
+            payment_method="credit", due_date=str(timezone.localdate() + timedelta(days=7)),
+            customer={"name": "Jo", "phone": "677", "address": "Douala"},
+        )
+        from unittest import mock
+
+        with mock.patch("sales.services.push.notify_users") as pushed2:
+            services.create_sale(self.cashier, credit)
+        self.assertEqual(pushed2.call_count, 1)
+
+    def test_boss_own_sale_never_notifies(self):
+        self.cs.notify_every_sale = True
+        self.cs.save()
+        _, pushed = self.sell(user=self.owner)
+        pushed.assert_not_called()
+
+    def test_cancellation_alert_and_switch(self):
+        from unittest import mock
+
+        sale = services.create_sale(self.cashier, self.payload())
+        with mock.patch("sales.services.push.notify_users") as pushed:
+            services.cancel_sale(self.cashier, sale)
+        self.assertEqual(pushed.call_count, 1)
+        sale2 = services.create_sale(self.cashier, self.payload())
+        self.cs.notify_cancellations = False
+        self.cs.save()
+        with mock.patch("sales.services.push.notify_users") as pushed:
+            services.cancel_sale(self.cashier, sale2)
+        pushed.assert_not_called()
+
+
+class HalfCartonTests(SalesTestBase):
+    """Cartons sold by the half (stock 4.5) and cartons opened onto the shelf."""
+
+    def setUp(self):
+        super().setUp()
+        from inventory.models import Product as P
+
+        self.carton = self.product
+        self.carton.name, self.carton.allow_half = "TOPISH 1L", True
+        self.carton.selling_price, self.carton.cost_price = 15000, 12000
+        self.carton.pieces_per_carton = 24
+        self.carton.save()
+        self.retail = P.objects.create(name="TOPISH 1L (RETAIL)", sku="TOPR", cost_price=500, selling_price=700)
+        self.carton.retail_version = self.retail
+        self.carton.save()
+
+    def half(self, user=None, qty="0.5", price=15000, **kw):
+        return services.create_sale(user or self.cashier, self.payload(
+            items=[{"product_id": self.carton.pk, "quantity": qty, "price": price}], **kw))
+
+    def test_half_carton_is_half_the_price_and_stock_goes_to_nine_and_a_half(self):
+        sale = self.half()
+        item = sale.items.get()
+        self.assertEqual(item.quantity, Decimal("0.5"))
+        self.assertEqual(item.amount, 7500)
+        self.assertEqual(item.discount, 0)
+        self.assertEqual(sale.total, 7500)
+        self.assertEqual(self.stock(), Decimal("9.5"))
+        self.assertEqual(item.profit, 7500 - 6000)  # half the carton cost
+
+    def test_two_halves_make_a_carton_and_cancel_returns_the_half(self):
+        s1, s2 = self.half(), self.half()
+        self.assertEqual(self.stock(), 9)
+        services.cancel_sale(self.owner, s1)
+        self.assertEqual(self.stock(), Decimal("9.5"))
+
+    def test_odd_price_half_rounds_up(self):
+        self.carton.selling_price = 15001
+        self.carton.save()
+        self.assertEqual(self.half(price=15001).items.get().amount, 7501)
+
+    def test_cannot_sell_half_of_a_product_that_does_not_allow_it(self):
+        self.carton.allow_half = False
+        self.carton.save()
+        with self.assertRaises(services.SaleError):
+            self.half()
+
+    def test_other_fractions_rejected(self):
+        for bad in ("0.3", "1.25", "0", "-1"):
+            with self.assertRaises(services.SaleError):
+                self.half(qty=bad)
+
+    def test_reduced_half_carton_price_still_needs_approval(self):
+        with self.assertRaises(services.SaleError):
+            self.half(price=14000)
+
+    def test_cannot_sell_more_than_stock_with_halves(self):
+        with self.assertRaises(services.SaleError):
+            self.half(qty="10.5")
+
+    def test_unpaid_invoice_with_half_carton(self):
+        pf = services.create_proforma(self.cashier, {
+            "customer": {"name": "ACME"}, "items": [{"product_id": self.carton.pk, "quantity": 1.5, "price": 15000}]})
+        self.assertEqual(pf.total, 22500)
+        self.assertEqual(self.stock(), 10)
+        item = pf.items.get()
+        sale = services.create_sale(self.cashier, {"payment_method": "cash", "proforma_id": pf.pk, "items": [
+            {"product_id": self.carton.pk, "quantity": 1.5, "price": item.net_price, "proforma_item_id": item.pk}]})
+        self.assertEqual(sale.total, 22500)
+        self.assertEqual(self.stock(), Decimal("8.5"))
+
+    def test_open_carton_moves_pieces_to_the_shelf(self):
+        from inventory.services import StockError, open_carton
+
+        result = open_carton(self.cashier, self.carton.pk, 1)
+        self.assertEqual(result["pieces"], 24)
+        self.assertEqual(Product.objects.get(pk=self.carton.pk).stock, 9)
+        self.assertEqual(Product.objects.get(pk=self.retail.pk).stock, 24)
+        moves = StockMovement.objects.filter(kind=StockMovement.TRANSFER)
+        self.assertEqual(moves.count(), 2)
+        with self.assertRaises(StockError):
+            open_carton(self.cashier, self.carton.pk, 50)
+
+    def test_cannot_open_a_half_carton_or_unlinked_product(self):
+        from inventory.services import StockError, open_carton
+
+        self.half(qty="9.5")  # leaves half a carton
+        with self.assertRaises(StockError):
+            open_carton(self.cashier, self.carton.pk, 1)
+        with self.assertRaises(StockError):
+            open_carton(self.cashier, self.retail.pk, 1)
+
+    def test_open_carton_endpoint_for_the_till(self):
+        self.client.force_login(self.cashier)
+        r = self.client.post(reverse("open_carton"), {"product_id": self.carton.pk, "count": 1}, content_type="application/json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["retail_stock"], 24)
+        r = self.client.post(reverse("open_carton"), {"product_id": self.carton.pk, "count": 99}, content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_short_shelf_error_mentions_opening_a_carton(self):
+        with self.assertRaises(services.SaleError) as ctx:
+            services.create_sale(self.cashier, self.payload(items=[{"product_id": self.retail.pk, "quantity": 1, "price": 700}]))
+        self.assertIn("Open a carton", str(ctx.exception))
+
+    def test_stock_worth_counts_the_half(self):
+        from inventory.services import stock_valuation
+
+        self.half(qty="0.5")
+        row = next(r for r in stock_valuation()["rows"] if r["product"].pk == self.carton.pk)
+        self.assertEqual(row["cost_value"], 12000 * 9 + 6000)

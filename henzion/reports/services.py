@@ -9,6 +9,7 @@ from django.utils import timezone
 from core import notify
 from core.constants import CREDIT, METHOD_LABELS, PAYMENT_METHODS, SALE_METHODS
 from core.models import CompanySettings
+from core.qty import fmt_qty
 from debts.models import Debt, DebtPayment
 from debts.services import debt_summary
 from inventory.models import Product
@@ -118,7 +119,7 @@ def sales_csv(start, end):
     for i in rows:
         writer.writerow([
             i.sale.number, i.sale.date, i.sale.customer_name or "Walk-in",
-            METHOD_LABELS[i.sale.payment_method], i.description, i.quantity, i.unit_price, i.discount, i.amount,
+            METHOD_LABELS[i.sale.payment_method], i.description, fmt_qty(i.quantity), i.unit_price, i.discount, i.amount,
             "Neighbor item" if i.is_sourced else "Own stock",
             i.neighbor.name if i.is_sourced else "", i.unit_cost if i.is_sourced else "",
         ])

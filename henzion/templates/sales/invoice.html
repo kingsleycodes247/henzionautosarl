@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Invoice {{ sale.number }} · {{ company.name }}</title>
+<title>{% if is_proforma %}Unpaid invoice{% else %}Invoice{% endif %} {{ sale.number }} · {{ company.name }}</title>
 <style>
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; }
@@ -50,23 +50,26 @@
   .sign span.line { display: inline-block; border-bottom: 1px solid #555; width: 150px; margin: 0 4px; }
   .note { margin: 12px 0 0; text-align: center; font: italic 9px Georgia, serif; color: #64748b; }
   .thanks { margin-top: 20px; text-align: center; font: 10px Georgia, serif; color: #64748b; }
+  .watermark.paid { color: rgba(22, 163, 74, .18); }
   .watermark { position: absolute; top: 45%; left: 0; right: 0; text-align: center; font: 700 110px Arial; color: rgba(220, 38, 38, .18); transform: rotate(-25deg); pointer-events: none; }
   @media print { body { background: #fff; } .toolbar { display: none; } .sheet { margin: 0; } }
 </style>
 </head>
 <body>
 <div class="toolbar">
-  <a class="ghost" href="{% url 'sale_detail' sale.pk %}">← Back</a>
+  <a class="ghost" href="{% if is_proforma %}{% url 'proforma_detail' sale.pk %}{% else %}{% url 'sale_detail' sale.pk %}{% endif %}">← Back</a>
   <button onclick="window.print()">Print / Save as PDF</button>
 </div>
 
 <div class="sheet">
-  {% if sale.status == 'cancelled' %}<div class="watermark">CANCELLED</div>{% endif %}
+  {% if sale.status == 'cancelled' %}<div class="watermark">CANCELLED</div>
+  {% elif is_proforma and sale.status == 'open' %}<div class="watermark">UNPAID</div>
+  {% elif is_proforma and sale.status == 'paid' %}<div class="watermark paid">PAID</div>{% endif %}
 
   <div class="header">
     <img class="logo" src="{% static 'img/logo.jpeg' %}" alt="Logo">
     <div class="hd">
-      <div class="tiny">{{ company.name }} &bull; Invoice / Facture</div>
+      <div class="tiny">{{ company.name }} &bull; {% if is_proforma %}Proforma / Unpaid invoice{% else %}Invoice / Facture{% endif %}</div>
       <h1>{{ company.name }}</h1>
       <div class="tag">{{ company.tagline }}</div>
       <div class="desc">{{ company.description }}</div>
@@ -76,7 +79,7 @@
   </div>
 
   <div class="titlebar">
-    <div class="l">FACTURE / INVOICE</div>
+    <div class="l">{% if is_proforma %}PROFORMA / UNPAID INVOICE{% else %}FACTURE / INVOICE{% endif %}</div>
     <div class="r">N° {{ sale.number }}</div>
   </div>
 
@@ -87,19 +90,28 @@
       <div class="row"><b>Address</b><span>{{ sale.customer_address }}</span></div>
     </div>
     <div class="box">
-      <div class="row"><b>Due Date</b><span>{% if sale.due_date %}{{ sale.due_date|date:"d / m / Y" }}{% endif %}</span></div>
+      <div class="row">{% if is_proforma %}<b>Valid Until</b><span>{{ sale.valid_until|date:"d / m / Y" }}</span>{% else %}<b>Due Date</b><span>{% if sale.due_date %}{{ sale.due_date|date:"d / m / Y" }}{% endif %}</span>{% endif %}</div>
       <div class="row"><b>Phone</b><span>{{ sale.customer_phone }}</span></div>
       <div class="row"><b>NIU / Tax ID</b><span>{{ sale.customer_niu }}</span></div>
     </div>
   </div>
 
+  {% if is_proforma and sale.hide_prices %}
+  <table class="items">
+    <thead><tr><th style="width:6%">#</th><th style="width:74%">Description / Designation</th><th style="width:20%">Qty</th></tr></thead>
+    <tbody>
+      {% for i in items %}<tr><td class="n">{{ forloop.counter }}</td><td>{{ i.description }}</td><td class="r">{{ i.quantity|qty }}</td></tr>{% endfor %}
+      {% for n in blank_rows %}<tr><td class="n">{{ n }}</td><td></td><td></td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}
   <table class="items">
     <thead><tr>
       <th style="width:5%">#</th><th style="width:41%">Description / Designation</th><th style="width:11%">Qty</th>
       <th style="width:15%">Unit Price</th><th style="width:13%">Discount</th><th style="width:15%">Amount</th></tr></thead>
     <tbody>
       {% for i in items %}
-      <tr><td class="n">{{ forloop.counter }}</td><td>{{ i.description }}</td><td class="r">{{ i.quantity }}</td>
+      <tr><td class="n">{{ forloop.counter }}</td><td>{{ i.description }}</td><td class="r">{{ i.quantity|qty }}</td>
         <td class="r">{{ i.unit_price|fcfa }}</td><td class="r">{% if i.discount %}{{ i.discount|fcfa }}{% endif %}</td><td class="r"><strong>{{ i.amount|fcfa }}</strong></td></tr>
       {% endfor %}
       {% for n in blank_rows %}
@@ -107,12 +119,16 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endif %}
 
   <div class="bottom">
     <div class="cols">
       <div style="flex:1">
         <h4>Payment / Conditions</h4>
-        {% if payments|length > 1 %}
+        {% if is_proforma %}
+          <p>Status: <strong>{% if sale.status == 'paid' %}PAID{% elif sale.status == 'cancelled' %}CANCELLED{% else %}NOT YET PAID{% endif %}</strong>. Goods are released once payment has been received.</p>
+          <p>Valid until <strong>{{ sale.valid_until|date:"d/m/Y" }}</strong>. Availability is confirmed on payment.</p>
+        {% elif payments|length > 1 %}
           <p>Payment:
             {% for p in payments %}<strong>{{ p.get_method_display }} {{ p.amount|fcfa }}</strong>{% if p.reference %} (ref. {{ p.reference }}){% endif %}{% if not forloop.last %} &nbsp;+&nbsp; {% endif %}{% endfor %} FCFA</p>
         {% else %}
@@ -129,6 +145,12 @@
       </div>
     </div>
 
+    {% if is_proforma and sale.hide_prices %}
+    <div class="grand">
+      <div class="l">Prices available on request</div>
+      <div class="r">&nbsp;</div>
+    </div>
+    {% else %}
     <div class="totals">
       <div class="t"><span class="lab">Subtotal</span><span class="val">{{ sale.subtotal|fcfa }} FCFA</span></div>
       <div class="t"><span class="lab">VAT / Tax</span><span class="val">{{ sale.vat_amount|fcfa }} FCFA</span></div>
@@ -137,13 +159,15 @@
       <div class="l">Total Due / Net à payer</div>
       <div class="r">{{ sale.total|fcfa }} FCFA</div>
     </div>
+    {% endif %}
   </div>
 
   <div class="sign">
     <div>Seller / Authorized signature: <span class="line"></span></div>
     <div>Stamp: <span class="line"></span></div>
   </div>
-  <p class="note">This invoice is issued for goods supplied by {{ company.name|upper }}. Please retain this document for your records.</p>
+  {% if is_proforma %}<p class="note">This is a proforma (unpaid) invoice, not a receipt. A final invoice is issued by {{ company.name|upper }} once payment has been received.</p>
+  {% else %}<p class="note">This invoice is issued for goods supplied by {{ company.name|upper }}. Please retain this document for your records.</p>{% endif %}
   <p class="thanks">Thank you for your patronage &bull; Merci pour votre confiance</p>
 </div>
 </body>

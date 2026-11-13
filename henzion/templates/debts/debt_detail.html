@@ -28,7 +28,7 @@
 <div class="mt-5 grid gap-5 lg:grid-cols-3">
   <section class="lg:col-span-2 rounded-xl bg-white p-5 shadow-sm">
     <h2 class="font-semibold">Payments</h2>
-    <table class="mt-2 w-full text-sm">
+    <div class="overflow-x-auto"><table class="mt-2 w-full text-sm">
       {% for p in payments %}
       <tr class="border-t">
         <td class="py-2">{{ p.paid_on|date:"d M Y" }}</td>
@@ -40,7 +40,7 @@
         </td>
       </tr>
       {% empty %}<tr><td class="py-4 text-slate-500">No payment received yet.</td></tr>{% endfor %}
-    </table>
+    </table></div>
     {% if debt.notes %}<p class="mt-4 border-t pt-3 text-sm text-slate-600"><strong>Notes:</strong> {{ debt.notes }}</p>{% endif %}
   </section>
 

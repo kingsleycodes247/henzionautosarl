@@ -11,7 +11,7 @@ from core.constants import SALE_METHODS
 from debts.services import debt_summary
 from inventory.models import Product
 from inventory.services import stock_valuation
-from sales.models import DiscountRequest, Sale, SalePayment
+from sales.models import DiscountRequest, Proforma, Sale, SalePayment
 from reports.services import eod_state
 from sales.neighbors import owed_by_neighbor, profit_summary
 
@@ -47,6 +47,12 @@ def dashboard(request):
 
     low = [p for p in Product.objects.with_stock().filter(is_active=True) if p.stock_qty <= p.reorder_level]
     ctx = {"today": today, "low_stock": low[:8], "low_stock_count": len(low)}
+    waiting = Proforma.objects.filter(status=Proforma.OPEN, valid_until__gte=today)
+    ctx["unpaid"] = {
+        "count": waiting.count(), "total": waiting.aggregate(s=Sum("total"))["s"] or 0,
+        "recent": list(waiting[:5]),
+        "expired": Proforma.objects.filter(status=Proforma.OPEN, valid_until__lt=today).count(),
+    }
 
     if user.is_owner:
         today_qs = done.filter(date=today)

@@ -6,7 +6,8 @@
     {% for c in categories %}
       <form method="post" class="flex items-center justify-between border-t py-2 first:border-0 text-sm">{% csrf_token %}
         <span>{{ c.name }} <span class="text-xs text-slate-500">({{ c.products.count }})</span></span>
-        <button name="delete" value="{{ c.pk }}" class="text-xs text-red-600 hover:underline" onclick="return confirm('Delete this category? Products keep existing without a category.')">Delete</button>
+        <span><a href="{% url 'product_list' %}?category={{ c.pk }}" class="mr-3 text-xs text-brand-pink hover:underline">View items</a>
+        <button name="delete" value="{{ c.pk }}" class="text-xs text-red-600 hover:underline" onclick="return confirm('Delete this category? Products keep existing without a category.')">Delete</button></span>
       </form>
     {% empty %}<p class="text-sm text-slate-500">No categories yet.</p>{% endfor %}
   </div>

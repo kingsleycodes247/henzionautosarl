@@ -1,6 +1,8 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
-from django.db.models import BigIntegerField, Sum, Value
+from django.db.models import DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
 
 
@@ -15,11 +17,17 @@ class Category(models.Model):
         return self.name
 
 
+def clean_qty(value):
+    """4.0 -> 4, 4.5 -> Decimal('4.5'): whole numbers stay whole everywhere they are shown."""
+    value = Decimal(value or 0)
+    return int(value) if value == value.to_integral_value() else value.quantize(Decimal("0.1"))
+
+
 class ProductQuerySet(models.QuerySet):
     def with_stock(self):
         """Adds `stock_qty` = sum of every stock movement (the ledger)."""
         return self.annotate(
-            stock_qty=Coalesce(Sum("movements__quantity"), Value(0), output_field=BigIntegerField())
+            stock_qty=Coalesce(Sum("movements__quantity"), Value(Decimal("0")), output_field=DecimalField(max_digits=12, decimal_places=1))
         )
 
 
@@ -31,6 +39,19 @@ class Product(models.Model):
     cost_price = models.BigIntegerField("Cost price (FCFA)", default=0)
     selling_price = models.BigIntegerField("Selling price (FCFA)")
     reorder_level = models.PositiveIntegerField("Low-stock alert at", default=5)
+    allow_half = models.BooleanField(
+        "Can be sold by the half", default=False,
+        help_text="Tick for cartons that are sometimes sold as half a carton (stock then shows e.g. 4.5).",
+    )
+    pieces_per_carton = models.PositiveIntegerField(
+        "Pieces in a carton", null=True, blank=True,
+        help_text="Only for a carton product that has a retail listing: how many retail pieces one carton holds.",
+    )
+    retail_version = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="carton_versions",
+        verbose_name="Retail listing of this carton",
+        help_text="The '(RETAIL)' product that opened cartons are moved into.",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -45,9 +66,13 @@ class Product(models.Model):
     @property
     def stock(self):
         value = getattr(self, "stock_qty", None)
-        if value is not None:
-            return value
-        return self.movements.aggregate(s=Sum("quantity"))["s"] or 0
+        if value is None:
+            value = self.movements.aggregate(s=Sum("quantity"))["s"] or 0
+        return clean_qty(value)
+
+    @property
+    def can_open_carton(self):
+        return bool(self.retail_version_id and self.pieces_per_carton)
 
     @property
     def is_low(self):
@@ -62,7 +87,9 @@ class StockMovement(models.Model):
     RETURN = "return"
     ADJUSTMENT = "adjustment"
     OPENING = "opening"
+    TRANSFER = "transfer"
     KIND_CHOICES = [
+        (TRANSFER, "Carton opened (moved to shelf)"),
         (OPENING, "Opening stock"),
         (RECEIPT, "Stock received"),
         (SALE, "Sale"),
@@ -72,7 +99,7 @@ class StockMovement(models.Model):
 
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="movements")
     kind = models.CharField(max_length=12, choices=KIND_CHOICES)
-    quantity = models.IntegerField(help_text="Positive = stock in, negative = stock out.")
+    quantity = models.DecimalField(max_digits=10, decimal_places=1, help_text="Positive = stock in, negative = stock out.")
     reference = models.CharField(max_length=60, blank=True)
     supplier = models.CharField(max_length=120, blank=True)
     note = models.CharField(max_length=200, blank=True)
@@ -83,4 +110,4 @@ class StockMovement(models.Model):
         ordering = ["-created_at", "-id"]
 
     def __str__(self):
-        return f"{self.product} {self.quantity:+d} ({self.kind})"
+        return f"{self.product} {self.quantity:+} ({self.kind})"

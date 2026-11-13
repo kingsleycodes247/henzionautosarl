@@ -1,3 +1,5 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -104,7 +106,7 @@ class SaleItem(models.Model):
     # Empty for items taken from a neighbor: they are not in our products and never touch stock.
     product = models.ForeignKey("inventory.Product", null=True, blank=True, on_delete=models.PROTECT, related_name="sale_items")
     description = models.CharField(max_length=200)
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=1)  # whole, or x.5 for half cartons
     unit_price = models.BigIntegerField()
     discount = models.BigIntegerField(default=0, help_text="Total discount on this line.")
     amount = models.BigIntegerField()
@@ -121,7 +123,7 @@ class SaleItem(models.Model):
 
     @property
     def cost_total(self):
-        return self.quantity * self.unit_cost
+        return int((Decimal(self.quantity) * self.unit_cost).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
     @property
     def profit(self):
@@ -144,7 +146,7 @@ class DiscountRequest(models.Model):
     ]
 
     product = models.ForeignKey("inventory.Product", on_delete=models.CASCADE, related_name="discount_requests")
-    quantity = models.PositiveIntegerField(default=1)
+    quantity = models.DecimalField(max_digits=10, decimal_places=1, default=1)
     original_price = models.BigIntegerField()
     requested_price = models.BigIntegerField()
     reason = models.CharField(max_length=200, blank=True)
@@ -176,3 +178,96 @@ class DiscountRequest(models.Model):
             self.status = self.EXPIRED
             self.save(update_fields=["status"])
         return self.status
+
+
+class Proforma(models.Model):
+    """An unpaid invoice (proforma): a priced list of items given to a customer or company so they can
+    pay. It is NOT a sale: it takes nothing out of stock, counts in no sales total and is not paid
+    until the cashier receives the money and turns it into a real sale (then `sale` points to it)."""
+
+    OPEN, PAID, CANCELLED = "open", "paid", "cancelled"
+    STATUS_CHOICES = [(OPEN, "Unpaid"), (PAID, "Paid"), (CANCELLED, "Cancelled")]
+
+    number = models.CharField(max_length=20, blank=True, db_index=True)
+    client_uuid = models.UUIDField(null=True, blank=True, unique=True)
+    date = models.DateField(default=timezone.localdate)
+    valid_until = models.DateField()
+
+    customer_name = models.CharField(max_length=120)
+    customer_phone = models.CharField(max_length=30, blank=True)
+    customer_address = models.CharField(max_length=200, blank=True)
+    customer_niu = models.CharField(max_length=40, blank=True)
+    notes = models.CharField(max_length=255, blank=True)
+    # Printed copy shows items and quantities only (for a customer who passes the quote on).
+    # The final receipt of the sale made when it is paid always shows prices.
+    hide_prices = models.BooleanField(default=False)
+
+    subtotal = models.BigIntegerField(default=0)
+    vat_amount = models.BigIntegerField(default=0)
+    total = models.BigIntegerField(default=0)
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=OPEN)
+    sale = models.OneToOneField(Sale, null=True, blank=True, on_delete=models.SET_NULL, related_name="proforma")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_by_name = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return self.number or f"Unpaid invoice #{self.pk}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if not self.number:
+            self.number = f"PRO-{self.pk:06d}"
+            super().save(update_fields=["number"])
+
+    @property
+    def is_open(self):
+        return self.status == self.OPEN
+
+    @property
+    def is_expired(self):
+        return self.is_open and self.valid_until < timezone.localdate()
+
+    @property
+    def can_be_paid(self):
+        return self.is_open and not self.is_expired
+
+    @property
+    def cashier_name(self):
+        if self.created_by_id:
+            return self.created_by.display_name()
+        return self.created_by_name or "Former user"
+
+
+class ProformaItem(models.Model):
+    proforma = models.ForeignKey(Proforma, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey("inventory.Product", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    description = models.CharField(max_length=200)
+    category_name = models.CharField(max_length=80, blank=True)
+    quantity = models.DecimalField(max_digits=10, decimal_places=1)
+    unit_price = models.BigIntegerField()
+    list_price = models.BigIntegerField(default=0)
+    discount = models.BigIntegerField(default=0)
+    amount = models.BigIntegerField()
+
+    # Item fetched from a neighbor (never printed on the invoice; carried over when it is paid).
+    is_sourced = models.BooleanField(default=False)
+    neighbor_name = models.CharField(max_length=120, blank=True)
+    unit_cost = models.BigIntegerField(default=0)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.quantity} × {self.description}"
+
+    @property
+    def net_price(self):
+        """What the customer pays for one, after any approved discount."""
+        if not self.quantity:
+            return self.unit_price
+        return int((Decimal(self.amount) / Decimal(self.quantity)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))

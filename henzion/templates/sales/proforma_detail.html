@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block title %}{{ pf.number }} · {{ company.name }}{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">Unpaid invoice {{ pf.number }}
+      {% if pf.status == 'paid' %}<span class="ml-2 rounded bg-emerald-100 px-2 py-0.5 align-middle text-sm font-semibold text-emerald-700">Paid</span>
+      {% elif pf.status == 'cancelled' %}<span class="ml-2 rounded bg-slate-100 px-2 py-0.5 align-middle text-sm font-semibold text-slate-600">Cancelled</span>
+      {% elif pf.is_expired %}<span class="ml-2 rounded bg-red-100 px-2 py-0.5 align-middle text-sm font-semibold text-red-700">Expired</span>
+      {% else %}<span class="ml-2 rounded bg-amber-100 px-2 py-0.5 align-middle text-sm font-semibold text-amber-700">Unpaid</span>{% endif %}</h1>
+    <p class="text-sm text-slate-500">{{ pf.date|date:"l j F Y" }} · valid until {{ pf.valid_until|date:"j F Y" }} · made by {{ pf.cashier_name }}</p>
+  </div>
+  <div class="flex flex-wrap gap-2 text-sm">
+    <a href="{% url 'proforma_invoice' pf.pk %}" target="_blank" class="rounded-lg bg-brand-navy px-4 py-2 font-semibold text-white">Print / Save as PDF</a>
+    {% if pf.can_be_paid %}<a href="{% url 'pos' %}?proforma={{ pf.pk }}" class="rounded-lg bg-brand-pink px-4 py-2 font-semibold text-white">Payment received: process sale</a>{% endif %}
+    {% if not pf.can_be_paid and pf.status != 'paid' %}<a href="{% url 'pos' %}?copy={{ pf.pk }}" class="rounded-lg border bg-white px-4 py-2">Copy into a new sale</a>{% endif %}
+    {% if pf.status == 'open' %}
+    <form method="post" action="{% url 'proforma_toggle_prices' pf.pk %}">{% csrf_token %}
+      <button class="rounded-lg border bg-white px-4 py-2">{% if pf.hide_prices %}Show prices on print{% else %}Hide prices on print{% endif %}</button></form>
+    <form method="post" action="{% url 'proforma_cancel' pf.pk %}" onsubmit="return confirm('Cancel this unpaid invoice?')">{% csrf_token %}
+      <button class="rounded-lg border border-red-300 bg-white px-4 py-2 text-red-600">Cancel</button></form>{% endif %}
+  </div>
+</div>
+
+{% if pf.hide_prices %}
+<p class="mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">🙈 <strong>Prices are hidden</strong> on the printed copy (items and quantities only). You still see them here. The receipt of the final sale always shows prices.</p>
+{% endif %}
+{% if pf.status == 'open' %}
+<p class="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Not paid yet. No stock has been taken out and it is not counted in sales. When the money arrives, press <strong>Payment received: process sale</strong>.</p>
+{% elif pf.status == 'paid' and pf.sale %}
+<p class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">Paid. The sale is recorded as <a class="font-semibold underline" href="{% url 'sale_detail' pf.sale.pk %}">{{ pf.sale.number }}</a>.</p>
+{% endif %}
+
+<div class="mt-5 grid gap-5 lg:grid-cols-3">
+  <div class="lg:col-span-2 overflow-x-auto rounded-xl bg-white shadow-sm">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Item</th><th class="px-4 py-3 text-right">Qty</th><th class="px-4 py-3 text-right">Unit price</th><th class="px-4 py-3 text-right">Discount</th><th class="px-4 py-3 text-right">Amount</th></tr></thead>
+      {% for i in items %}<tr class="border-t"><td class="px-4 py-3">{{ i.description }}
+          {% if i.category_name %}<span class="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{{ i.category_name }}</span>{% endif %}
+          {% if i.is_sourced %}<span class="ml-1 rounded bg-violet-100 px-1.5 py-0.5 text-xs font-semibold text-violet-700">Neighbor</span>{% if user.is_owner %}<div class="text-xs text-slate-500">from {{ i.neighbor_name }} · cost {{ i.unit_cost|fcfa }} each</div>{% endif %}{% endif %}</td>
+        <td class="px-4 py-3 text-right">{{ i.quantity|qty }}</td><td class="px-4 py-3 text-right">{{ i.unit_price|fcfa }}</td>
+        <td class="px-4 py-3 text-right">{% if i.discount %}-{{ i.discount|fcfa }}{% endif %}</td><td class="px-4 py-3 text-right font-medium">{{ i.amount|fcfa }}</td></tr>{% endfor %}
+      <tfoot class="border-t text-right">
+        <tr><td colspan="4" class="px-4 pt-3">Subtotal</td><td class="px-4 pt-3">{{ pf.subtotal|fcfa }}</td></tr>
+        {% if pf.vat_amount %}<tr><td colspan="4" class="px-4">VAT</td><td class="px-4">{{ pf.vat_amount|fcfa }}</td></tr>{% endif %}
+        <tr class="font-bold"><td colspan="4" class="px-4 py-3">Total (FCFA)</td><td class="px-4 py-3 text-brand-pink">{{ pf.total|fcfa }}</td></tr>
+      </tfoot>
+    </table>
+  </div>
+  <div class="space-y-4">
+    <div class="rounded-xl bg-white p-5 shadow-sm text-sm">
+      <h2 class="font-semibold">Customer</h2>
+      <div class="mt-2 font-medium">{{ pf.customer_name }}</div>
+      {% if pf.customer_phone %}<div>{{ pf.customer_phone }}</div>{% endif %}
+      {% if pf.customer_address %}<div class="text-slate-500">{{ pf.customer_address }}</div>{% endif %}
+      {% if pf.customer_niu %}<div class="text-slate-500">NIU: {{ pf.customer_niu }}</div>{% endif %}
+      {% if pf.notes %}<div class="mt-2 text-slate-500">Note: {{ pf.notes }}</div>{% endif %}
+    </div>
+    <a href="{% url 'proforma_list' %}" class="block text-sm text-slate-500 hover:underline">← All unpaid invoices</a>
+  </div>
+</div>
+{% endblock %}

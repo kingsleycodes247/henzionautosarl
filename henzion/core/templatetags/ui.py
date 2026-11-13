@@ -1,5 +1,7 @@
 from django import template
 
+from core.qty import fmt_qty, line_money
+
 register = template.Library()
 
 
@@ -16,8 +18,8 @@ def fcfa(value):
 def mul(value, other):
     """{{ qty|mul:cost }}"""
     try:
-        return int(value) * int(other)
-    except (TypeError, ValueError):
+        return line_money(other, value)
+    except (TypeError, ValueError, ArithmeticError):
         return 0
 
 
@@ -45,3 +47,15 @@ def nav_active(context, *prefixes):
         if (prefix == "/" and path == "/") or (prefix != "/" and path.startswith(prefix)):
             return "bg-slate-700 text-white"
     return "text-slate-300 hover:bg-slate-800"
+
+
+@register.filter
+def qty(value):
+    """4.0 -> 4, 4.5 -> 4.5"""
+    return fmt_qty(value)
+
+
+@register.filter
+def qty_signed(value):
+    text = fmt_qty(value)
+    return text if text.startswith("-") else f"+{text}"

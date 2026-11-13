@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Log in · {{ company.name }}</title>
   <link rel="icon" href="{% static 'img/logo.jpeg' %}">
+  <link rel="manifest" href="{% url 'pwa_manifest' %}">
+  <meta name="theme-color" content="#1e293b">
+  <link rel="apple-touch-icon" href="{% static 'img/pwa/apple-touch-icon.png' %}">
   {% include "_tailwind.html" %}
 </head>
 <body class="min-h-screen bg-[#1e293b] flex items-center justify-center p-4">

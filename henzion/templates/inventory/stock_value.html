@@ -21,7 +21,7 @@
     <div class="mt-1 text-xl font-bold text-emerald-700">{{ totals.profit|fcfa }} <span class="text-xs font-normal">FCFA</span></div>
     <div class="text-xs text-slate-500">selling price minus cost</div></div>
   <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Items in stock</div>
-    <div class="mt-1 text-xl font-bold">{{ totals.units|fcfa }}</div>
+    <div class="mt-1 text-xl font-bold">{{ totals.units|qty }}</div>
     <div class="text-xs text-slate-500">across {{ totals.products }} product{{ totals.products|pluralize }}</div></div>
 </div>
 
@@ -34,19 +34,25 @@
 <div class="mt-5 grid gap-5 lg:grid-cols-3">
   <section class="rounded-xl bg-white p-5 shadow-sm">
     <h2 class="font-semibold">By category</h2>
-    <table class="mt-2 w-full text-sm">
+    <div class="overflow-x-auto"><table class="mt-2 w-full text-sm">
       <tr class="text-xs uppercase text-slate-500"><td></td><td class="text-right">At cost</td><td class="text-right">At price</td></tr>
       {% for c in categories %}
-      <tr class="border-t"><td class="py-2">{{ c.name }}<div class="text-xs text-slate-500">{{ c.units }} item{{ c.units|pluralize }}</div></td>
+      <tr class="border-t"><td class="py-2">{{ c.name }}<div class="text-xs text-slate-500">{{ c.units|qty }} item{{ c.units|pluralize }}</div></td>
         <td class="py-2 text-right">{{ c.cost|fcfa }}</td><td class="py-2 text-right font-medium">{{ c.retail|fcfa }}</td></tr>
       {% empty %}<tr><td class="py-3 text-slate-500">No products yet.</td></tr>{% endfor %}
-    </table>
+    </table></div>
   </section>
 
   <section class="lg:col-span-2">
     <form class="mb-3 flex gap-3 text-sm">
-      <input name="q" value="{{ q }}" placeholder="Search name or code…" class="w-64 rounded-lg border border-slate-300 px-3 py-2">
+      <input name="q" value="{{ q }}" placeholder="Search name, code or category…" class="w-64 rounded-lg border border-slate-300 px-3 py-2">
+      <select name="category" class="rounded-lg border border-slate-300 px-3 py-2">
+        <option value="">All categories</option>
+        {% for c in category_list %}<option value="{{ c.pk }}" {% if category == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+        <option value="none" {% if category == 'none' %}selected{% endif %}>No category</option>
+      </select>
       <button class="rounded-lg bg-slate-800 px-4 py-2 text-white">Search</button>
+      {% if q or category %}<a href="{% url 'stock_value' %}" class="px-2 py-2 text-brand-pink">Clear</a>{% endif %}
     </form>
     <div class="overflow-x-auto rounded-xl bg-white shadow-sm">
     <table class="w-full text-sm">
@@ -55,8 +61,8 @@
         <th class="px-4 py-3 text-right">Worth at cost</th><th class="px-4 py-3 text-right">Price each</th><th class="px-4 py-3 text-right">Worth at price</th></tr></thead>
       {% for r in rows %}
       <tr class="border-t">
-        <td class="px-4 py-3"><div class="font-medium">{{ r.product.name }}</div><div class="text-xs text-slate-500">{{ r.product.sku }}</div></td>
-        <td class="px-4 py-3 text-right">{{ r.qty }}</td>
+        <td class="px-4 py-3"><div class="font-medium">{{ r.product.name }}</div><div class="text-xs text-slate-500">{{ r.product.sku }}{% if r.product.category %} · {{ r.product.category }}{% endif %}</div></td>
+        <td class="px-4 py-3 text-right">{{ r.qty|qty }}</td>
         <td class="px-4 py-3 text-right text-slate-500">{% if r.product.cost_price %}{{ r.product.cost_price|fcfa }}{% else %}<span class="text-amber-600">not set</span>{% endif %}</td>
         <td class="px-4 py-3 text-right">{{ r.cost_value|fcfa }}</td>
         <td class="px-4 py-3 text-right text-slate-500">{{ r.product.selling_price|fcfa }}</td>
@@ -64,9 +70,10 @@
       </tr>
       {% empty %}<tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">No products found.</td></tr>{% endfor %}
       <tfoot class="border-t-2 bg-slate-50 font-bold"><tr>
-        <td class="px-4 py-3">Total</td><td class="px-4 py-3 text-right">{{ totals.units }}</td><td></td>
+        <td class="px-4 py-3">Total</td><td class="px-4 py-3 text-right">{{ totals.units|qty }}</td><td></td>
         <td class="px-4 py-3 text-right">{{ totals.cost|fcfa }}</td><td></td><td class="px-4 py-3 text-right text-brand-pink">{{ totals.retail|fcfa }}</td></tr></tfoot>
     </table></div>
+    {% if selection %}<p class="mt-3 rounded-lg bg-white px-4 py-3 text-sm shadow-sm ring-1 ring-slate-200">This selection: <strong>{{ selection.products }}</strong> product{{ selection.products|pluralize }}, <strong>{{ selection.qty|qty }}</strong> in stock, worth <strong>{{ selection.cost_value|fcfa }}</strong> at cost and <strong class="text-brand-pink">{{ selection.retail_value|fcfa }}</strong> at selling price.</p>{% endif %}
     <p class="mt-2 text-xs text-slate-500">Only active products with stock on hand are counted. Totals above cover all products, even when you search.</p>
   </section>
 </div>

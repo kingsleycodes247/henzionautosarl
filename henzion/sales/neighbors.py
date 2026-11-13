@@ -3,6 +3,8 @@
 They are kept out of the shop's own sales figures on purpose; only their profit (or loss) is
 added to the boss's profit.
 """
+from core.qty import line_money, num_qty
+
 from .models import Neighbor, Sale, SaleItem
 
 
@@ -23,15 +25,15 @@ def profit_summary(start, end):
         "neighbor_loss": 0, "neighbor_loss_lines": 0,
     }
     for sourced, amount, qty, cost in rows:
-        profit = amount - qty * cost
+        profit = amount - line_money(cost, qty)
         if not sourced:
             out["own_profit"] += profit
             continue
         out["neighbor_profit"] += profit
         out["neighbor_lines"] += 1
-        out["neighbor_qty"] += qty
+        out["neighbor_qty"] += num_qty(qty)
         out["neighbor_revenue"] += amount
-        out["neighbor_cost"] += qty * cost
+        out["neighbor_cost"] += line_money(cost, qty)
         if profit < 0:
             out["neighbor_loss"] += -profit
             out["neighbor_loss_lines"] += 1
@@ -47,10 +49,10 @@ def neighbor_breakdown(start, end):
     per = {}
     for name, amount, qty, cost in rows:
         entry = per.setdefault(name, {"name": name, "items": 0, "revenue": 0, "cost": 0, "profit": 0})
-        entry["items"] += qty
+        entry["items"] += num_qty(qty)
         entry["revenue"] += amount
-        entry["cost"] += qty * cost
-        entry["profit"] += amount - qty * cost
+        entry["cost"] += line_money(cost, qty)
+        entry["profit"] += amount - line_money(cost, qty)
     return sorted(per.values(), key=lambda e: e["name"].lower())
 
 
@@ -62,7 +64,7 @@ def owed_by_neighbor():
     per = {}
     for nid, name, qty, cost in rows:
         entry = per.setdefault(nid, {"id": nid, "name": name, "owed": 0, "items": 0})
-        entry["owed"] += qty * cost
+        entry["owed"] += line_money(cost, qty)
         entry["items"] += 1
     phones = dict(Neighbor.objects.filter(pk__in=list(per)).values_list("pk", "phone"))
     for entry in per.values():

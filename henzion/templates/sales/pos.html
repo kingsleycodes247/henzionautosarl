@@ -3,11 +3,14 @@
 {% block title %}New sale · {{ company.name }}{% endblock %}
 {% block content %}
 {{ products|json_script:"products-data" }}
+{% if prefill %}{{ prefill|json_script:"prefill-data" }}{% endif %}
 <div id="pos"
      data-owner="{{ is_owner|yesno:'1,0' }}"
      data-vat="{{ vat_rate }}"
      data-sell-url="{% url 'pos' %}"
      data-request-url="{% url 'discount_request' %}"
+     data-open-carton-url="{% url 'open_carton' %}"
+     data-proforma-url="{% url 'proforma_create' %}"
      data-status-url="/sales/discount/__ID__/status/">
 
 <div class="flex items-center justify-between">
@@ -15,12 +18,28 @@
   <span class="text-sm text-slate-500">{{ today }}</span>
 </div>
 
+{% if prefill %}
+<div class="mt-4 rounded-lg border px-4 py-3 text-sm {% if prefill.mode == 'pay' %}border-emerald-300 bg-emerald-50 text-emerald-900{% else %}border-sky-200 bg-sky-50 text-sky-900{% endif %}">
+  {% if prefill.mode == 'pay' %}
+    <strong>Payment received for unpaid invoice {{ prefill.number }}.</strong> The items and prices below come from it. Choose how the customer paid, then press <strong>Complete sale</strong>: stock is taken out and the sale is recorded only now.
+  {% else %}
+    <strong>Copied from {{ prefill.number }}</strong> at today's prices. This is a new cart; the old invoice is not changed.
+  {% endif %}
+  <a href="{% url 'pos' %}" class="ml-2 underline">Start empty instead</a>
+  {% if prefill.skipped %}<div class="mt-1 text-red-700">Not available any more and left out: {{ prefill.skipped|join:", " }}.</div>{% endif %}
+</div>
+{% endif %}
+
 <div class="mt-4 grid gap-5 xl:grid-cols-5">
 
   <!-- Products -->
   <section class="xl:col-span-2 rounded-xl bg-white p-4 shadow-sm">
-    <input id="search" autofocus autocomplete="off" placeholder="Search a product or scan its code…"
-           class="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm focus:border-pink-500 focus:ring-1 focus:ring-pink-500 outline-none">
+    <div class="flex gap-2">
+      <input id="search" autofocus autocomplete="off" placeholder="Search by name, code or category…"
+             class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-3 text-sm focus:border-pink-500 focus:ring-1 focus:ring-pink-500 outline-none">
+      <select id="cat-filter" class="w-40 rounded-lg border border-slate-300 px-2 py-3 text-sm" aria-label="Category"><option value="">All categories</option></select>
+    </div>
+    <p id="product-count" class="mt-2 text-xs text-slate-500"></p>
     <div id="product-list" class="mt-3 grid max-h-[28rem] gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2"></div>
 
     <!-- Something the customer wants that we don't stock: fetched from a neighbor -->
@@ -125,7 +144,19 @@
     <div id="pending-box" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
       ⏳ Waiting for the boss to approve a reduced price… the sale can be completed once he answers.</div>
 
-    <button id="sell-btn" disabled class="w-full rounded-xl bg-brand-pink py-4 text-lg font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">Complete sale</button>
+    <div class="flex flex-col gap-3 sm:flex-row">
+      <button id="sell-btn" disabled class="flex-1 rounded-xl bg-brand-pink py-4 text-lg font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">Complete sale</button>
+      {% if not prefill or prefill.mode != 'pay' %}
+      <button id="pf-btn" type="button" disabled class="rounded-xl border-2 border-brand-navy bg-white px-6 py-4 text-base font-bold text-brand-navy hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">Create unpaid invoice</button>
+      {% endif %}
+    </div>
+    {% if not prefill or prefill.mode != 'pay' %}
+    <p class="-mt-1 text-xs text-slate-500">
+      <strong>Create unpaid invoice</strong> makes an invoice to hand to the customer to pay against (the customer name above is needed). It does <em>not</em> take anything out of stock or count as a sale. When the money arrives, open it under <a class="text-brand-pink underline" href="{% url 'proforma_list' %}">Unpaid invoices</a> and press <em>Payment received</em>.
+      <label class="mt-1 flex items-center gap-2"><input id="pf-hide" type="checkbox" class="h-4 w-4"> <span><strong>Hide prices</strong> on the printed unpaid invoice (items and quantities only)</span></label>
+      Valid for <input id="pf-days" type="number" min="1" max="90" value="7" class="w-14 rounded border border-slate-300 px-1 py-0.5 text-center"> days.
+    </p>
+    {% endif %}
   </section>
 </div>
 </div>

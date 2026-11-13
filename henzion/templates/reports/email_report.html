@@ -42,7 +42,7 @@
   <tr><td style="padding:8px 24px;">
     <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Items sold today</div>
     <table role="presentation" width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
-      {% for p in r.items_sold %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ p.description }}</td><td align="right" style="color:#64748b;">×{{ p.qty }}</td><td align="right"><strong>{{ p.amount|fcfa }}</strong></td></tr>
+      {% for p in r.items_sold %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ p.description }}</td><td align="right" style="color:#64748b;">×{{ p.qty|qty }}</td><td align="right"><strong>{{ p.amount|fcfa }}</strong></td></tr>
       {% empty %}<tr><td style="color:#64748b;">No items sold from our own stock.</td></tr>{% endfor %}
     </table>
   </td></tr>
@@ -50,7 +50,7 @@
   <tr><td style="padding:8px 24px;">
     <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Top products</div>
     <table role="presentation" width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
-      {% for p in r.top_products %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ p.description }}</td><td align="right" style="color:#64748b;">×{{ p.qty }}</td><td align="right"><strong>{{ p.amount|fcfa }}</strong></td></tr>
+      {% for p in r.top_products %}<tr style="border-top:1px solid #e2e8f0;"><td>{{ p.description }}</td><td align="right" style="color:#64748b;">×{{ p.qty|qty }}</td><td align="right"><strong>{{ p.amount|fcfa }}</strong></td></tr>
       {% empty %}<tr><td style="color:#64748b;">No sales in this period.</td></tr>{% endfor %}
     </table>
   </td></tr>
@@ -101,7 +101,7 @@
 
   <tr><td style="padding:8px 24px 20px;">
     <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Low stock</div>
-    {% for p in r.low_stock %}<div style="font-size:13px;border-top:1px solid #e2e8f0;padding:5px 0;">{{ p.name }} <strong style="float:right;color:#d97706;">{{ p.stock_qty }}</strong></div>
+    {% for p in r.low_stock %}<div style="font-size:13px;border-top:1px solid #e2e8f0;padding:5px 0;">{{ p.name }} <strong style="float:right;color:#d97706;">{{ p.stock_qty|qty }}</strong></div>
     {% empty %}<div style="font-size:13px;color:#64748b;">Everything is well stocked.</div>{% endfor %}
   </td></tr>
 

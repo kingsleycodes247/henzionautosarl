@@ -45,6 +45,7 @@ class CompanySettingsForm(StyledModelForm):
             "name", "tagline", "description", "address", "phones", "niu",
             "boss_email", "boss_whatsapp", "vat_rate", "auto_approve_percent",
             "approval_timeout_minutes", "eod_start_hour", "eod_end_hour", "eod_auto_on_logout",
+            "notify_every_sale", "notify_sale_min", "notify_cancellations",
         ]
 
     def clean(self):

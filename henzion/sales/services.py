@@ -1,7 +1,7 @@
 """Business rules for sales. Views stay thin; everything that touches money lives here."""
 import datetime
 from datetime import timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.core import signing
 from django.db import transaction
@@ -11,13 +11,14 @@ from django.urls import reverse
 from django.utils import timezone
 from django.conf import settings
 
-from core import notify
+from core import notify, push
 from core.constants import CREDIT, METHOD_LABELS, SALE_METHODS, SPLIT
 from core.models import CompanySettings, log
+from core.qty import TENTH, fmt_qty, line_money, num_qty
 from debts.models import Customer, Debt
 from inventory.models import Product, StockMovement
 
-from .models import DiscountRequest, Neighbor, Sale, SaleItem, SalePayment
+from .models import DiscountRequest, Neighbor, Proforma, ProformaItem, Sale, SaleItem, SalePayment
 
 TOKEN_SALT = "henzion.discount"
 APPROVAL_VALID_FOR = timedelta(hours=2)  # an approved price can be used on a sale for 2 hours
@@ -39,6 +40,34 @@ def _to_int(value, label):
     return number
 
 
+def _to_qty(value, product):
+    """A quantity: a whole number, or a half (0.5, 1.5 ...) for products that can be sold by the half."""
+    try:
+        q = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        raise SaleError(f"Invalid quantity for {product.name}.")
+    if q <= 0:
+        raise SaleError(f"Quantity for {product.name} must be more than 0.")
+    if (q * 2) % 1 != 0:
+        raise SaleError(f"Quantity for {product.name} must be a whole number or a half.")
+    if q % 1 != 0 and not product.allow_half:
+        raise SaleError(f"{product.name} can't be sold by the half.")
+    return q.quantize(TENTH)
+
+
+def _carton_source(product):
+    """The carton product whose cartons are opened into this retail product (if it has one)."""
+    return Product.objects.filter(retail_version=product, pieces_per_carton__isnull=False, is_active=True).first()
+
+
+def _line_amounts(price, list_price, qty):
+    """(unit_price, discount, amount) for one line. Anything below the list price is a discount."""
+    amount = line_money(price, qty)
+    unit_price = max(price, list_price)
+    discount = line_money(list_price, qty) - amount if price < list_price else 0
+    return unit_price, discount, amount
+
+
 def stock_of(product_id):
     return StockMovement.objects.filter(product_id=product_id).aggregate(s=Sum("quantity"))["s"] or 0
 
@@ -56,6 +85,8 @@ def decide_discount(req, approve, via):
         req.decided_at = timezone.now()
         req.save(update_fields=["status", "decided_via", "decided_at"])
     log(None, f"discount {req.status}", req.product, f"{req.original_price}->{req.requested_price} via {via}")
+    if via not in ("owner", "auto-rule"):
+        _push_to_cashier(req, approve)
     return True
 
 
@@ -76,7 +107,7 @@ def _build_boss_message(req, cs):
     who = req.requested_by.display_name() if req.requested_by else "A cashier"
     text = (
         f"{cs.name} - price reduction request\n"
-        f"Product: {req.product.name} (qty {req.quantity})\n"
+        f"Product: {req.product.name} (qty {fmt_qty(req.quantity)})\n"
         f"List price: {money(req.original_price)} FCFA\n"
         f"Requested: {money(req.requested_price)} FCFA (-{req.percent}%)\n"
         f"By: {who}\n"
@@ -85,9 +116,9 @@ def _build_boss_message(req, cs):
         f"Valid for {cs.approval_timeout_minutes} min. No answer = price stays the same."
     )
     html = render_to_string("emails/discount_request.html", {
-        "company": cs.name, "who": who, "product": req.product.name, "quantity": req.quantity,
+        "company": cs.name, "who": who, "product": req.product.name, "quantity": num_qty(req.quantity),
         "original": money(req.original_price), "requested": money(req.requested_price),
-        "percent": req.percent, "saving": money((req.original_price - req.requested_price) * req.quantity),
+        "percent": req.percent, "saving": money(line_money(req.original_price - req.requested_price, req.quantity)),
         "reason": req.reason, "link": link, "minutes": cs.approval_timeout_minutes,
     })
     subject = (
@@ -107,12 +138,51 @@ def _deliver_to_boss(message, whatsapp, email):
         print(f"\n[Discount request - no boss contact configured in Settings]\n{message['text']}\n")
 
 
+def _push_to_boss(req):
+    """Phone notification for the boss(es): tapping it opens the signed Approve/Decline page."""
+    who = req.requested_by.display_name() if req.requested_by else "A cashier"
+    push.notify_users(
+        push.owners(),
+        "Price approval needed",
+        f"{who}: {req.product.name} {money(req.original_price)} → {money(req.requested_price)} FCFA (-{req.percent}%)",
+        url=reverse("discount_decide", args=[make_token(req)]),
+        tag=f"discount-{req.pk}",
+    )
+
+
+def _push_to_cashier(req, approved):
+    if req.requested_by_id is None:
+        return
+    word = "approved" if approved else "declined"
+    push.notify_users(
+        [req.requested_by],
+        f"Price {word}",
+        f"{req.product.name}: {money(req.requested_price)} FCFA " + ("approved by the boss." if approved else "declined, the original price stays."),
+        url=reverse("pos"),
+        tag=f"discount-{req.pk}",
+    )
+
+
+def _push_sale_to_boss(user, sale, breakdown, has_credit):
+    """Optional 'you just made a sale' alert. Never for the boss's own sales; off unless he turned it on."""
+    cs = CompanySettings.get()
+    if user.is_owner or not cs.notify_every_sale:
+        return
+    if sale.total < cs.notify_sale_min and not has_credit:
+        return
+    push.notify_users(
+        push.owners(), f"Sale: {money(sale.total)} FCFA",
+        f"{user.display_name()} · {breakdown}" + (" · includes credit" if has_credit else ""),
+        url=reverse("sale_detail", args=[sale.pk]), tag=f"sale-{sale.pk}",
+    )
+
+
 def request_discount(user, product, price, quantity, reason=""):
     cs = CompanySettings.get()
     original = product.selling_price
     if price < 0 or price >= original:
         raise SaleError("The requested price must be lower than the list price.")
-    quantity = max(1, quantity)
+    quantity = max(Decimal("0.5"), Decimal(str(quantity)))
     req = DiscountRequest.objects.create(
         product=product, quantity=quantity, original_price=original, requested_price=price,
         reason=reason[:200], requested_by=user,
@@ -124,6 +194,7 @@ def request_discount(user, product, price, quantity, reason=""):
         decide_discount(req, True, "auto-rule")
     else:
         notify.run_in_background(_deliver_to_boss, _build_boss_message(req, cs), cs.boss_whatsapp, cs.boss_email)
+        _push_to_boss(req)
     req.refresh_from_db()
     return req
 
@@ -202,6 +273,26 @@ def _get_neighbor(name):
     return Neighbor.objects.filter(name__iexact=name).first() or Neighbor.objects.create(name=name)
 
 
+def _authorise_price(user, product, price, raw, used_requests):
+    """Anyone may sell at or above the list price; a cashier's lower price needs the boss's approval."""
+    list_price = product.selling_price
+    if price < list_price and not user.is_owner:
+        req = DiscountRequest.objects.select_for_update().filter(
+            pk=_to_int(raw.get("request_id") or 0, "approval"), product=product,
+            requested_by=user, status=DiscountRequest.APPROVED, consumed=False,
+            decided_at__gte=timezone.now() - APPROVAL_VALID_FOR,
+        ).first()
+        if not req or req.requested_price != price or req.pk in used_requests:
+            raise SaleError(f"The reduced price for {product.name} needs the boss's approval.")
+        used_requests.add(req.pk)
+    # A price above the list price is allowed for everyone; only a lower price needs approval.
+
+
+def _totals(subtotal, cs):
+    vat = int((Decimal(subtotal) * cs.vat_rate / 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return vat, subtotal + vat
+
+
 @transaction.atomic
 def create_sale(user, data):
     """Validate a POS payload and create the sale, its payment lines, stock movements and,
@@ -218,6 +309,20 @@ def create_sale(user, data):
     sourced = _parse_sourced(data.get("sourced_items") or [])
     if not raw_items and not sourced:
         raise SaleError("Add at least one product.")
+
+    # Paying an unpaid invoice (proforma): its quoted prices are honoured, and it is marked paid below.
+    proforma, quoted, used_quoted = None, {}, set()
+    if data.get("proforma_id"):
+        proforma = Proforma.objects.select_for_update().filter(pk=_to_int(data["proforma_id"], "unpaid invoice")).first()
+        if not proforma:
+            raise SaleError("That unpaid invoice no longer exists.")
+        if proforma.status == Proforma.PAID:
+            raise SaleError(f"{proforma.number} has already been paid.")
+        if proforma.status == Proforma.CANCELLED:
+            raise SaleError(f"{proforma.number} was cancelled.")
+        if proforma.is_expired:
+            raise SaleError(f"{proforma.number} expired on {proforma.valid_until:%d/%m/%Y}. Create a new one.")
+        quoted = {pi.pk: pi for pi in proforma.items.filter(is_sourced=False)}
 
     parts = _parse_payments(data)
     has_credit = any(p["method"] == CREDIT for p in parts)
@@ -241,44 +346,40 @@ def create_sale(user, data):
     lines, needed, used_requests = [], {}, set()
     for raw in raw_items:
         pid = _to_int(raw.get("product_id"), "product")
-        qty = _to_int(raw.get("quantity"), "quantity")
         price = _to_int(raw.get("price"), "price")
         product = products.get(pid)
         if not product:
             raise SaleError("A product on this sale no longer exists.")
-        if qty < 1:
-            raise SaleError(f"Quantity for {product.name} must be at least 1.")
+        qty = _to_qty(raw.get("quantity"), product)
         if price < 0:
             raise SaleError(f"Invalid price for {product.name}.")
 
         list_price = product.selling_price
-        if price < list_price and not user.is_owner:
-            req = DiscountRequest.objects.select_for_update().filter(
-                pk=_to_int(raw.get("request_id") or 0, "approval"), product=product,
-                requested_by=user, status=DiscountRequest.APPROVED, consumed=False,
-                decided_at__gte=timezone.now() - APPROVAL_VALID_FOR,
-            ).first()
-            if not req or req.requested_price != price or req.pk in used_requests:
-                raise SaleError(f"The reduced price for {product.name} needs the boss's approval.")
-            used_requests.add(req.pk)
-        elif price > list_price and not user.is_owner:
-            raise SaleError(f"{product.name} can't be sold above its list price.")
+        pi = quoted.get(_to_int(raw.get("proforma_item_id") or 0, "unpaid invoice item")) if raw.get("proforma_item_id") else None
+        honoured = bool(
+            pi and pi.product_id == pid and price == pi.net_price and qty <= pi.quantity and pi.pk not in used_quoted
+        )
+        if honoured:  # the price was already authorised when the unpaid invoice was made
+            used_quoted.add(pi.pk)
+        else:
+            _authorise_price(user, product, price, raw, used_requests)
 
-        unit_price = max(price, list_price)
-        discount = (list_price - price) * qty if price < list_price else 0
+        unit_price, discount, amount = _line_amounts(price, list_price, qty)
         needed[pid] = needed.get(pid, 0) + qty
         lines.append(dict(product=product, qty=qty, unit_price=unit_price, discount=discount,
-                          amount=unit_price * qty - discount, request_id=raw.get("request_id")))
+                          amount=amount, request_id=raw.get("request_id")))
 
     for pid, qty in needed.items():
         available = stock_of(pid)
         if qty > available:
-            raise SaleError(f"Not enough stock for {products[pid].name}: {available} available, {qty} requested.")
+            raise SaleError(
+                f"Not enough stock for {products[pid].name}: {fmt_qty(available)} available, {fmt_qty(qty)} requested."
+                + (" Open a carton to move stock to the shelf." if _carton_source(products[pid]) else "")
+            )
 
     sourced_subtotal = sum(s["amount"] for s in sourced)
     subtotal = sum(line["amount"] for line in lines) + sourced_subtotal
-    vat = int((Decimal(subtotal) * cs.vat_rate / 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-    total = subtotal + vat
+    vat, total = _totals(subtotal, cs)
     if total <= 0:
         raise SaleError("The sale total must be more than 0.")
     # VAT is shared out in proportion, so own sales + neighbor items always add back up to the invoice.
@@ -338,6 +439,9 @@ def create_sale(user, data):
             neighbor=_get_neighbor(s["neighbor"]),
         )
     DiscountRequest.objects.filter(pk__in=used_requests).update(consumed=True)
+    if proforma:
+        proforma.status, proforma.sale = Proforma.PAID, sale
+        proforma.save(update_fields=["status", "sale"])
 
     for p in parts:
         SalePayment.objects.create(sale=sale, method=p["method"], amount=p["amount"], reference=p["reference"])
@@ -351,7 +455,9 @@ def create_sale(user, data):
         )
     breakdown = " + ".join(f"{METHOD_LABELS[p['method']]} {money(p['amount'])}" for p in parts)
     extra = f" (incl. {len(sourced)} neighbor item{'s' if len(sourced) != 1 else ''}: {money(sourced_total)})" if sourced else ""
-    log(user, "sale created", sale, f"{money(total)} FCFA = {breakdown}{extra}")
+    from_pf = f" (paid unpaid invoice {proforma.number})" if proforma else ""
+    log(user, "sale created", sale, f"{money(total)} FCFA = {breakdown}{extra}{from_pf}")
+    _push_sale_to_boss(user, sale, breakdown, has_credit)
     return sale
 
 
@@ -373,3 +479,95 @@ def cancel_sale(user, sale):
     sale.save(update_fields=["status"])
     note = f" ({already_paid} neighbor item(s) had already been paid for)" if already_paid else ""
     log(user, "sale cancelled", sale, f"{money(sale.total)} FCFA{note}")
+    cs = CompanySettings.get()
+    if cs.notify_cancellations and not user.is_owner:
+        push.notify_users(
+            push.owners(), "Sale cancelled",
+            f"{user.display_name()} cancelled {sale.number} ({money(sale.total)} FCFA).",
+            url=reverse("sale_detail", args=[sale.pk]), tag=f"cancel-{sale.pk}",
+        )
+
+
+@transaction.atomic
+def create_proforma(user, data):
+    """An unpaid invoice to give to a customer or company. It takes nothing out of stock, is not a
+    sale and is counted nowhere until it is paid (see create_sale with `proforma_id`)."""
+    client_uuid = data.get("client_uuid") or None
+    if client_uuid:
+        existing = Proforma.objects.filter(client_uuid=client_uuid).first()
+        if existing:
+            return existing
+
+    cs = CompanySettings.get()
+    raw_items = data.get("items") or []
+    sourced = _parse_sourced(data.get("sourced_items") or [])
+    if not raw_items and not sourced:
+        raise SaleError("Add at least one product.")
+    cust = data.get("customer") or {}
+    c_name = (cust.get("name") or "").strip()
+    if not c_name:
+        raise SaleError("Enter the customer or company name for the unpaid invoice.")
+    raw_days = data.get("valid_days")
+    days = 7 if raw_days in (None, "") else _to_int(raw_days, "number of days")
+    if not 1 <= days <= 90:
+        raise SaleError("An unpaid invoice can be valid for 1 to 90 days.")
+
+    ids = sorted({_to_int(i.get("product_id"), "product") for i in raw_items})
+    products = {p.pk: p for p in Product.objects.select_for_update().select_related("category").filter(pk__in=ids, is_active=True)}
+
+    lines, used_requests = [], set()
+    for raw in raw_items:
+        pid = _to_int(raw.get("product_id"), "product")
+        price = _to_int(raw.get("price"), "price")
+        product = products.get(pid)
+        if not product:
+            raise SaleError("A product on this invoice no longer exists.")
+        qty = _to_qty(raw.get("quantity"), product)
+        if price < 0:
+            raise SaleError(f"Invalid price for {product.name}.")
+        _authorise_price(user, product, price, raw, used_requests)
+        list_price = product.selling_price
+        unit_price, discount, amount = _line_amounts(price, list_price, qty)
+        lines.append(dict(product=product, qty=qty, unit_price=unit_price, list_price=list_price, discount=discount,
+                          amount=amount))
+
+    subtotal = sum(l["amount"] for l in lines) + sum(s["amount"] for s in sourced)
+    vat, total = _totals(subtotal, cs)
+    if total <= 0:
+        raise SaleError("The total must be more than 0.")
+
+    today = timezone.localdate()
+    pf = Proforma.objects.create(
+        client_uuid=client_uuid, date=today, valid_until=today + timedelta(days=days),
+        customer_name=c_name[:120], customer_phone=(cust.get("phone") or "").strip()[:30],
+        customer_address=(cust.get("address") or "").strip()[:200], customer_niu=(cust.get("niu") or "").strip()[:40],
+        notes=(data.get("notes") or "").strip()[:255], hide_prices=bool(data.get("hide_prices")),
+        subtotal=subtotal, vat_amount=vat, total=total, created_by=user, created_by_name=user.display_name(),
+    )
+    for l in lines:
+        ProformaItem.objects.create(
+            proforma=pf, product=l["product"], description=l["product"].name,
+            category_name=l["product"].category.name if l["product"].category else "",
+            quantity=l["qty"], unit_price=l["unit_price"], list_price=l["list_price"],
+            discount=l["discount"], amount=l["amount"],
+        )
+    for s in sourced:
+        ProformaItem.objects.create(
+            proforma=pf, product=None, description=s["name"], quantity=s["qty"], unit_price=s["price"],
+            list_price=s["price"], amount=s["amount"], is_sourced=True, neighbor_name=s["neighbor"], unit_cost=s["cost"],
+        )
+    DiscountRequest.objects.filter(pk__in=used_requests).update(consumed=True)
+    log(user, "unpaid invoice created", pf, f"{money(total)} FCFA for {c_name}")
+    return pf
+
+
+@transaction.atomic
+def cancel_proforma(user, proforma):
+    """Withdraws an unpaid invoice that will not be paid. Nothing else changes: it never touched stock."""
+    proforma = Proforma.objects.select_for_update().get(pk=proforma.pk)
+    if proforma.status != Proforma.OPEN:
+        raise SaleError(f"{proforma.number} is already {proforma.get_status_display().lower()}.")
+    proforma.status = Proforma.CANCELLED
+    proforma.save(update_fields=["status"])
+    log(user, "unpaid invoice cancelled", proforma, f"{money(proforma.total)} FCFA")
+    return proforma

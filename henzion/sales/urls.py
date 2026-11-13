@@ -5,6 +5,12 @@ from . import views
 urlpatterns = [
     path("new/", views.pos, name="pos"),
     path("", views.SaleListView.as_view(), name="sale_list"),
+    path("unpaid/", views.proforma_list, name="proforma_list"),
+    path("unpaid/new/", views.proforma_create, name="proforma_create"),
+    path("unpaid/<int:pk>/", views.proforma_detail, name="proforma_detail"),
+    path("unpaid/<int:pk>/invoice/", views.proforma_invoice, name="proforma_invoice"),
+    path("unpaid/<int:pk>/prices/", views.proforma_toggle_prices, name="proforma_toggle_prices"),
+    path("unpaid/<int:pk>/cancel/", views.proforma_cancel, name="proforma_cancel"),
     path("<int:pk>/", views.sale_detail, name="sale_detail"),
     path("<int:pk>/invoice/", views.invoice, name="invoice"),
     path("<int:pk>/cancel/", views.sale_cancel, name="sale_cancel"),

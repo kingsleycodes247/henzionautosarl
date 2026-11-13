@@ -9,7 +9,7 @@
   {% for r in pending %}
   <form method="post" action="{% url 'discount_decide_dashboard' r.pk %}" class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm ring-1 ring-brand-pink/40">
     {% csrf_token %}
-    <div class="text-sm"><strong>{{ r.product.name }}</strong> ×{{ r.quantity }}<br>
+    <div class="text-sm"><strong>{{ r.product.name }}</strong> ×{{ r.quantity|qty }}<br>
       {{ r.original_price|fcfa }} → <strong>{{ r.requested_price|fcfa }}</strong> FCFA (-{{ r.percent }}%)<br>
       <span class="text-slate-500">{{ r.requested_by.display_name }}{% if r.reason %} · “{{ r.reason }}”{% endif %} · expires {{ r.expires_at|date:"H:i" }}</span></div>
     <div class="flex gap-2 text-sm"><button name="action" value="approve" class="rounded-lg bg-emerald-600 px-4 py-2 text-white">Approve</button>
@@ -23,7 +23,7 @@
 <table class="w-full text-sm">
   <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">When</th><th class="px-4 py-3">Product</th><th class="px-4 py-3">Price</th><th class="px-4 py-3">Cashier</th><th class="px-4 py-3">Result</th></tr></thead>
   {% for r in requests %}
-  <tr class="border-t"><td class="px-4 py-2 whitespace-nowrap">{{ r.created_at|date:"d M H:i" }}</td><td class="px-4 py-2">{{ r.product.name }} ×{{ r.quantity }}</td>
+  <tr class="border-t"><td class="px-4 py-2 whitespace-nowrap">{{ r.created_at|date:"d M H:i" }}</td><td class="px-4 py-2">{{ r.product.name }} ×{{ r.quantity|qty }}</td>
     <td class="px-4 py-2">{{ r.original_price|fcfa }} → {{ r.requested_price|fcfa }}</td><td class="px-4 py-2">{{ r.requested_by.username|default:"-" }}</td>
     <td class="px-4 py-2"><span class="rounded px-2 py-0.5 text-xs
       {% if r.status == 'approved' %}bg-emerald-100 text-emerald-700{% elif r.status == 'declined' %}bg-red-100 text-red-700{% elif r.status == 'expired' %}bg-slate-100 text-slate-600{% else %}bg-amber-100 text-amber-700{% endif %}">{{ r.get_status_display }}</span>

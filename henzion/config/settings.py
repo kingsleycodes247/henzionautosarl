@@ -105,15 +105,7 @@ LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 
 # Email
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = env('EMAIL_HOST', default='smtp.gmail.com')
-EMAIL_PORT = 587
-EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='dreamstechsolutions001@gmail.com')
-EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='xrbd sltc vnvs hnls')
-EMAIL_USE_TLS = 'True'
-EMAIL_TIMEOUT = 10
 
-DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='dreamstechsolutions001@gmail.com')
 
 # WhatsApp Cloud API
 WHATSAPP_TOKEN = env("WHATSAPP_TOKEN")

@@ -11,5 +11,6 @@ urlpatterns = [
     path("movements/", views.MovementListView.as_view(), name="movement_list"),
     path("valuation/", views.stock_value, name="stock_value"),
     path("receive/", views.receive_stock, name="receive_stock"),
+    path("open-carton/", views.open_carton_view, name="open_carton"),
     path("adjust/", views.adjust_stock, name="adjust_stock"),
 ]

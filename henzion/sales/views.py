@@ -1,5 +1,6 @@
 import json
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -16,12 +17,13 @@ from django.views.generic import ListView, UpdateView
 
 from core.constants import METHOD_LABELS, SALE_METHODS
 from core.models import CompanySettings, log
+from core.qty import num_qty
 from core.permissions import FormPageMixin, OwnerRequiredMixin, owner_required
 from inventory.models import Product
 
 from . import services
 from .forms import NeighborForm, NeighborItemForm
-from .models import DiscountRequest, Neighbor, Sale, SaleItem
+from .models import DiscountRequest, Neighbor, Proforma, Sale, SaleItem
 from .neighbors import owed_by_neighbor, sourced_lines
 
 
@@ -48,20 +50,147 @@ def pos(request):
             return JsonResponse({"ok": False, "error": str(exc)}, status=400)
         return JsonResponse({"ok": True, "redirect": reverse("sale_detail", args=[sale.pk])})
 
+    all_products = list(Product.objects.with_stock().select_related("category").filter(is_active=True))
+    # retail listing id -> the carton product that can be opened to refill it
+    cartons = {
+        c.retail_version_id: {"id": c.pk, "name": c.name, "pieces": c.pieces_per_carton, "stock": num_qty(c.stock_qty)}
+        for c in all_products if c.retail_version_id and c.pieces_per_carton
+    }
     products = [
         {"id": p.pk, "name": p.name, "sku": p.sku, "price": p.selling_price,
-         "stock": p.stock_qty, "unit": p.unit, "category": p.category.name if p.category else ""}
-        for p in Product.objects.with_stock().select_related("category").filter(is_active=True)
+         "stock": num_qty(p.stock_qty), "unit": p.unit, "category": p.category.name if p.category else "",
+         "half": p.allow_half, "carton": cartons.get(p.pk)}
+        for p in all_products
     ]
     cs = CompanySettings.get()
+    prefill = _pos_prefill(request, {p["id"]: p for p in products})
     return render(request, "sales/pos.html", {
         "products": products,
+        "prefill": prefill,
         "neighbors": list(Neighbor.objects.values_list("name", flat=True)),
         "methods": SALE_METHODS,
         "is_owner": request.user.is_owner,
         "vat_rate": float(cs.vat_rate),
         "today": timezone.localdate().isoformat(),
     })
+
+
+def _pos_prefill(request, products_by_id):
+    """Loads an unpaid invoice into the till. ?proforma=ID = its money has arrived, honour its prices;
+    ?copy=ID = start a new cart from it at today's prices (for an expired or cancelled one)."""
+    pay = bool(request.GET.get("proforma"))
+    raw_id = request.GET.get("proforma") or request.GET.get("copy") or ""
+    if not raw_id.isdigit():
+        return None
+    pf = Proforma.objects.prefetch_related("items").filter(pk=int(raw_id)).first()
+    if pf is None:
+        messages.error(request, "That unpaid invoice was not found.")
+        return None
+    if pay and not pf.can_be_paid:
+        why = "has expired" if pf.is_expired else f"is {pf.get_status_display().lower()}"
+        messages.error(request, f"{pf.number} {why}, so it can't be paid. Use 'Copy into a new sale' instead.")
+        return None
+    items, sourced, skipped = [], [], []
+    for it in pf.items.all():
+        if it.is_sourced:
+            sourced.append({"name": it.description, "neighbor": it.neighbor_name, "cost": it.unit_cost, "price": it.net_price, "qty": num_qty(it.quantity)})
+            continue
+        product = products_by_id.get(it.product_id)
+        if product is None:
+            skipped.append(it.description)
+            continue
+        items.append({
+            "product_id": it.product_id, "item_id": it.pk if pay else None, "qty": num_qty(it.quantity),
+            "price": it.net_price if pay else product["price"],
+        })
+    return {
+        "mode": "pay" if pay else "copy", "id": pf.pk, "number": pf.number, "notes": pf.notes,
+        "customer": {"name": pf.customer_name, "phone": pf.customer_phone, "address": pf.customer_address, "niu": pf.customer_niu},
+        "items": items, "sourced": sourced, "skipped": skipped,
+    }
+
+
+# --------------------------------------------------------------------------- unpaid invoices (proforma)
+
+@login_required
+@require_POST
+def proforma_create(request):
+    try:
+        data = json.loads(request.body or b"{}")
+    except ValueError:
+        return JsonResponse({"ok": False, "error": "Bad request."}, status=400)
+    try:
+        pf = services.create_proforma(request.user, data)
+    except services.SaleError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    return JsonResponse({"ok": True, "redirect": reverse("proforma_detail", args=[pf.pk])})
+
+
+@login_required
+def proforma_list(request):
+    qs = Proforma.objects.all()
+    status = request.GET.get("status", "open")
+    today = timezone.localdate()
+    if status == "open":
+        qs = qs.filter(status=Proforma.OPEN, valid_until__gte=today)
+    elif status == "expired":
+        qs = qs.filter(status=Proforma.OPEN, valid_until__lt=today)
+    elif status in (Proforma.PAID, Proforma.CANCELLED):
+        qs = qs.filter(status=status)
+    else:
+        status = "all"
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(Q(number__icontains=q) | Q(customer_name__icontains=q) | Q(customer_phone__icontains=q))
+    page = Paginator(qs.select_related("sale"), 30).get_page(request.GET.get("page"))
+    waiting = Proforma.objects.filter(status=Proforma.OPEN, valid_until__gte=today)
+    from django.db.models import Sum
+
+    return render(request, "sales/proforma_list.html", {
+        "page_obj": page, "paginator": page.paginator, "is_paginated": page.has_other_pages(), "proformas": page,
+        "status": status, "q": q, "waiting_count": waiting.count(), "waiting_total": waiting.aggregate(s=Sum("total"))["s"] or 0,
+    })
+
+
+@login_required
+def proforma_detail(request, pk):
+    pf = get_object_or_404(Proforma.objects.select_related("sale", "created_by"), pk=pk)
+    return render(request, "sales/proforma_detail.html", {"pf": pf, "items": pf.items.all()})
+
+
+@login_required
+def proforma_invoice(request, pk):
+    """The printable unpaid invoice (same design as the paper invoice, marked UNPAID)."""
+    pf = get_object_or_404(Proforma, pk=pk)
+    items = list(pf.items.all())
+    return render(request, "sales/invoice.html", {
+        "sale": pf, "is_proforma": True, "items": items, "payments": [], "debt": None,
+        "blank_rows": range(len(items) + 1, 9), "company": CompanySettings.get(),
+    })
+
+
+@login_required
+@require_POST
+def proforma_toggle_prices(request, pk):
+    pf = get_object_or_404(Proforma, pk=pk)
+    pf.hide_prices = not pf.hide_prices
+    pf.save(update_fields=["hide_prices"])
+    messages.success(request, "Prices are now hidden on the printed copy." if pf.hide_prices else "Prices are now shown on the printed copy.")
+    return redirect("proforma_detail", pk=pf.pk)
+
+
+@login_required
+@require_POST
+def proforma_cancel(request, pk):
+    pf = get_object_or_404(Proforma, pk=pk)
+    if not request.user.is_owner and pf.created_by_id != request.user.pk:
+        return render(request, "403.html", status=403)
+    try:
+        services.cancel_proforma(request.user, pf)
+        messages.success(request, f"{pf.number} cancelled. Stock was never touched.")
+    except services.SaleError as exc:
+        messages.error(request, str(exc))
+    return redirect("proforma_detail", pk=pf.pk)
 
 
 # --------------------------------------------------------------------------- sales list / detail
@@ -157,11 +286,11 @@ def discount_request(request):
         data = json.loads(request.body or b"{}")
         product = get_object_or_404(Product, pk=int(data["product_id"]), is_active=True)
         req = services.request_discount(
-            request.user, product, int(data["price"]), int(data.get("quantity") or 1), data.get("reason", ""),
+            request.user, product, int(data["price"]), Decimal(str(data.get("quantity") or 1)), data.get("reason", ""),
         )
     except services.SaleError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, ArithmeticError):
         return JsonResponse({"ok": False, "error": "Bad request."}, status=400)
     return JsonResponse({
         "ok": True, "id": req.pk, "status": req.status,

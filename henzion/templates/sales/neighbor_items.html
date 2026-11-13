@@ -8,7 +8,7 @@
 </div>
 
 <div class="mt-4 grid grid-cols-2 gap-3 text-sm lg:grid-cols-5">
-  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Items sold</div><div class="mt-1 text-lg font-bold">{{ totals.qty }}</div></div>
+  <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Items sold</div><div class="mt-1 text-lg font-bold">{{ totals.qty|qty }}</div></div>
   <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Sold for</div><div class="mt-1 text-lg font-bold">{{ totals.revenue|fcfa }}</div></div>
   <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Neighbors' price</div><div class="mt-1 text-lg font-bold">{{ totals.cost|fcfa }}</div></div>
   <div class="rounded-xl bg-white p-4 shadow-sm"><div class="text-xs uppercase text-slate-500">Profit</div>
@@ -63,7 +63,7 @@
     <td class="px-4 py-3"><a class="font-medium hover:text-brand-pink" href="{% url 'sale_detail' r.sale.pk %}">{{ r.description }}</a>
       <div class="text-xs text-slate-500">{{ r.sale.number }} · {{ r.sale.created_by.username|default:r.sale.created_by_name|default:"-" }}</div></td>
     <td class="px-4 py-3">{{ r.neighbor.name }}</td>
-    <td class="px-4 py-3 text-right">{{ r.quantity }}</td>
+    <td class="px-4 py-3 text-right">{{ r.quantity|qty }}</td>
     <td class="px-4 py-3 text-right">{{ r.unit_cost|fcfa }}</td>
     <td class="px-4 py-3 text-right">{{ r.unit_price|fcfa }}</td>
     <td class="px-4 py-3 text-right font-semibold {% if r.profit < 0 %}text-red-600{% else %}text-emerald-700{% endif %}">{{ r.profit|fcfa }}{% if r.profit < 0 %}<div class="text-xs font-normal">loss</div>{% endif %}</td>

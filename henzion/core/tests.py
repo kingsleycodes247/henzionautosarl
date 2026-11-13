@@ -103,3 +103,39 @@ class UserRemovalTests(TestCase):
         res = self.client.get(reverse("user_list"))
         self.assertContains(res, "Disable")
         self.assertContains(res, "Delete")
+
+
+class PwaTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user("boss", password="x", role=User.OWNER)
+        self.cashier = User.objects.create_user("till", password="x", role=User.CASHIER)
+
+    def test_manifest_and_service_worker_are_public(self):
+        m = self.client.get("/manifest.webmanifest")
+        self.assertEqual(m.status_code, 200)
+        self.assertEqual(m["Content-Type"], "application/manifest+json")
+        self.assertEqual(m.json()["display"], "standalone")
+        sw = self.client.get("/sw.js")
+        self.assertEqual(sw.status_code, 200)
+        self.assertEqual(sw["Service-Worker-Allowed"], "/")
+        self.assertIn("javascript", sw["Content-Type"])
+        self.assertEqual(self.client.get("/offline/").status_code, 200)
+
+    def test_subscribe_needs_login_and_keys(self):
+        body = {"endpoint": "https://push.example/abc", "keys": {"p256dh": "k", "auth": "a"}}
+        self.assertEqual(self.client.post("/push/subscribe/", body, content_type="application/json").status_code, 302)
+        self.client.force_login(self.owner)
+        with self.settings(VAPID_PUBLIC_KEY="", VAPID_PRIVATE_KEY=""):
+            self.assertEqual(self.client.post("/push/subscribe/", body, content_type="application/json").status_code, 400)
+        with self.settings(VAPID_PUBLIC_KEY="pub", VAPID_PRIVATE_KEY="priv"):
+            r = self.client.post("/push/subscribe/", body, content_type="application/json")
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(self.owner.push_subscriptions.count(), 1)
+            r = self.client.post("/push/unsubscribe/", {"endpoint": body["endpoint"]}, content_type="application/json")
+            self.assertEqual(self.owner.push_subscriptions.count(), 0)
+
+    def test_only_owners_are_targeted(self):
+        from core import push
+
+        names = set(push.owners().values_list("username", flat=True))
+        self.assertEqual(names, {"boss"})

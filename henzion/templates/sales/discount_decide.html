@@ -15,7 +15,7 @@
       <p class="mt-4 rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-700">{{ problem }}</p>
     {% else %}
       <div class="mt-4 rounded-lg bg-slate-50 p-4 text-left text-sm">
-        <div class="font-semibold">{{ req.product.name }} <span class="font-normal text-slate-500">×{{ req.quantity }}</span></div>
+        <div class="font-semibold">{{ req.product.name }} <span class="font-normal text-slate-500">×{{ req.quantity|qty }}</span></div>
         <div class="mt-2 flex justify-between"><span class="text-slate-500">List price</span><span>{{ req.original_price|fcfa }} FCFA</span></div>
         <div class="flex justify-between"><span class="text-slate-500">Requested</span><strong class="text-[#f6097f]">{{ req.requested_price|fcfa }} FCFA</strong></div>
         <div class="flex justify-between"><span class="text-slate-500">Discount</span><span>-{{ req.discount_each|fcfa }} each (-{{ req.percent }}%)</span></div>
